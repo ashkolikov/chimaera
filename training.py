@@ -3,6 +3,7 @@ import tensorflow as tf
 import torch
 import numpy as np
 from sklearn.decomposition import PCA
+from skimage.measure import block_reduce
 import json
 import gc
 from .dataset import *
@@ -393,7 +394,7 @@ class ModelMaster():
 
         aggregation_rate =  pred.shape[1] // 512
         fun = np.max if aggregation == 'max' else np.mean
-        pred = block_reduce(pred, (1, aggregation_rate), fun) # from .plot from skimage.measure
+        pred = block_reduce(pred, (1, aggregation_rate), fun)
 
         #hic = self.data.get_region(self.data.names[ind], start, end)[0]
         hic = get_2d(self.data.y_val[num])
