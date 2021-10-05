@@ -393,7 +393,7 @@ class ModelMaster():
 
         aggregation_rate =  pred.shape[1] // 512
         fun = np.max if aggregation == 'max' else np.mean
-        pred = block_reduce(pred, (1, aggregation_rate), fun)
+        pred = block_reduce(pred, (1, aggregation_rate), fun) # from .plot from skimage.measure
 
         #hic = self.data.get_region(self.data.names[ind], start, end)[0]
         hic = get_2d(self.data.y_val[num])
