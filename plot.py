@@ -1,7 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import matplotlib
-from skimage.measure import block_reduce
 from scipy.ndimage import rotate, zoom, gaussian_filter
 import pandas as pd
 import seaborn as sns
