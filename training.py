@@ -9,8 +9,6 @@ import gc
 from .dataset import *
 from .plot import *
 
-# save and load data
-
 class ModelMaster():
     """Contains model and functions to work with it"""
     def __init__(self, 
@@ -18,13 +16,10 @@ class ModelMaster():
                  saving_dir = None, 
                  model_dir = None, 
                  rewrite = False,
-                 predict_as_training = True,
-                 framework = 'tensorflow', 
-                 model_parts = ['enc', 'dec', 'model']):
+                 predict_as_training = True):
 
         super(ModelMaster, self).__init__()
 
-        self.model_parts = model_parts
         self.data = data
         if data is None or isinstance(data, str):
             if data is None:
@@ -34,10 +29,7 @@ class ModelMaster():
             with open(data_params_path, "r") as read_file:
                 data_params = json.load(read_file)
             self.data = DataMaster(**data_params)
-            #except:
-            #    raise ValueError('Data arguement is not correct')
         self.input_len = self.data.dna_len
-        self.framework = framework
         self.saving_dir = saving_dir
         self.predict_as_training = predict_as_training
         self.test_data = None
@@ -61,14 +53,11 @@ class ModelMaster():
             print('No model files provided, build model parts manually using corresponding build_ methods')
         else:
             availible_files = os.listdir(model_dir)
-            if self.framework == 'tensorflow':
-                self.model = tf.keras.models.load_model(os.path.join(model_dir, 'model.h5'))
-                self.enc = tf.keras.models.load_model(os.path.join(model_dir, 'enc.h5'))
-                self.dec = tf.keras.models.load_model(os.path.join(model_dir, 'dec.h5'))
-                self.batch_size = max(1, 2**27//np.prod(self.model.layers[1].output_shape[1:]))
-                self.encode_y()
-            else:
-                pass
+            self.model = tf.keras.models.load_model(os.path.join(model_dir, 'model.h5'))
+            self.enc = tf.keras.models.load_model(os.path.join(model_dir, 'enc.h5'))
+            self.dec = tf.keras.models.load_model(os.path.join(model_dir, 'dec.h5'))
+            self.batch_size = max(1, 2**27//np.prod(self.model.layers[1].output_shape[1:]))
+            self.encode_y()
         if self.encoded:
             self.train_generator = DataGenerator(data=self.data, batch_size=self.batch_size, train=True, encoder=self.enc) # encoder is used only if dataset uses stochastic sampling
             self.val_generator = DataGenerator(data=self.data, batch_size=self.batch_size, train=False, encoder=self.enc)
@@ -79,57 +68,40 @@ class ModelMaster():
         self.build_model(model)
     
     def build_enc(self, fun, weights=None):
-        if self.framework == 'tensorflow':
-            if fun is not None:
-                self.enc = fun()
-            if weights is not None and self.enc is not None:
-                self.enc.load_weights(weights)
-                self.encode_y()
-        else:
-            pass
+        if fun is not None:
+            self.enc = fun()
+        if weights is not None and self.enc is not None:
+            self.enc.load_weights(weights)
+            self.encode_y()
 
     def build_dec(self, fun, weights=None):
-        if self.framework == 'tensorflow':
-            if fun is not None:
-                self.dec = fun()
-                self.dec.build(input_shape = self.enc.output_shape)
-            if weights is not None and self.dec is not None:
-                self.dec.load_weights(weights)
-        else:
-            pass
+        if fun is not None:
+            self.dec = fun()
+            self.dec.build(input_shape = self.enc.output_shape)
+        if weights is not None and self.dec is not None:
+            self.dec.load_weights(weights)
         self.build_ae(train = (weights is None))
 
     def build_model(self, fun, weights=None):
-        if self.framework == 'tensorflow':
-            if fun is not None:
-                self.model = fun()
-                assert self.model.input_shape[1] == self.input_len
-            if weights is not None:
-                self.model.load_weights(weights)
-            self.batch_size = max(1, 2**27//np.prod(self.model.layers[1].output_shape[1:]))
-
-        else:
-            self.batch_size = max(1, 2**27//(self.input_len * 64))
-            pass
+        if fun is not None:
+            self.model = fun()
+            assert self.model.input_shape[1] == self.input_len
+        if weights is not None:
+            self.model.load_weights(weights)
+        self.batch_size = max(1, 2**27//np.prod(self.model.layers[1].output_shape[1:]))
             
 
     def build_ae(self, train):
         if self.enc is not None and self.dec is not None:
-            if self.framework == 'tensorflow':
-                self.ae = tf.keras.models.Sequential([self.enc, self.dec])
-                self.ae.build(input_shape = self.enc.input_shape)
-                self.ae.compile(loss = 'mse', optimizer = 'adam')
-            else:
-                pass
+            self.ae = tf.keras.models.Sequential([self.enc, self.dec])
+            self.ae.build(input_shape = self.enc.input_shape)
+            self.ae.compile(loss = 'mse', optimizer = 'adam')
         if train:
             self.train_ae()
 
     def train_ae(self):
         print('Training autoencoder for Hi-C maps ...')
-        if self.framework == 'tensorflow':
-            self.ae.fit(HiCDataGenerator(self.data), epochs = self.ae_epochs)
-        else:
-            pass
+        self.ae.fit(HiCDataGenerator(self.data), epochs = self.ae_epochs)
         self.encode_y()
         print('Autoencoder is ready')
 
@@ -150,77 +122,76 @@ class ModelMaster():
         self.transformed_background = pca.transform(latent).T
         self.pca = lambda x: self._pca.transform(x).T
 
-    def save(self):
+    def save(self, save_main_model = True):
         if self.saving_dir is None:
+            print("Model won't be saved while training")
             return
         with open(os.path.join(self.saving_dir, 'data_params.json'), 'w') as file:
                   file.write(json.dumps(self.data.params))
-        if self.framework == 'tensorflow':
-            self.enc.save(os.path.join(self.saving_dir, 'enc.h5'))
-            self.dec.save(os.path.join(self.saving_dir, 'dec.h5'))
-            pass
+        self.enc.save(os.path.join(self.saving_dir, 'enc.h5'))
+        self.dec.save(os.path.join(self.saving_dir, 'dec.h5'))
+        if save_main_model:
+            self.model.save(os.path.join(self.saving_dir, 'model.h5'))
+            
+    def describe(self, text):
+        if not self.saving_dir:
+            print('''Saving path is not provided. Set 'saving_dir' attribute''')
         else:
-            pass
+            with open(os.path.join(self.saving_dir, 'description.txt'), 'w') as file:
+                file.write(text)
 
     def train(self, epochs, batch_size = None, callbacks = 'full', show_summary = True):
-        self.save()
-        if self.saving_dir is None:
-            raise NotImplementedError("Model can't be trained without saving path")
+        self.save(save_main_model = False)            
         if batch_size is None:
             batch_size = self.batch_size
         else:
             self.batch_size = batch_size 
-        if self.framework == 'tensorflow':
-            if show_summary:
-                self.model.summary()
 
+        if show_summary:
+            self.model.summary()
+        callbs = []
+        if self.saving_dir:
             checkpoint = tf.keras.callbacks.ModelCheckpoint(filepath = os.path.join(self.saving_dir, 'model.h5'),
-                                                            save_weights_only = False)
-            if callbacks == 'classical':
-                callbs = [checkpoint]
+                                                        save_weights_only = False)
+            callbs.append(checkpoint)
 
-            elif callbacks == 'full':
-                pca_callback = LatentSpaceDrawingCallback(self,
-                                                          x_train_sample = self.data.x_train_sample, 
-                                                         x_val_sample = self.data.x_val_sample, 
-                                                         y_train_sample = self.data.y_latent_train_sample, 
-                                                         y_val_sample = self.data.y_latent_val_sample,
-                                                         pca = self.pca,
-                                                         transformed_background = self.transformed_background, 
-                                                         saving_dir = self.saving_dir,
-                                                         epochs = epochs)
+        if callbacks == 'full':
+            img_saving_dir = self.saving_dir if self.saving_dir else '.'
+            pca_callback = LatentSpaceDrawingCallback(self,
+                                                     x_train_sample = self.data.x_train_sample, 
+                                                     x_val_sample = self.data.x_val_sample, 
+                                                     y_train_sample = self.data.y_latent_train_sample, 
+                                                     y_val_sample = self.data.y_latent_val_sample,
+                                                     pca = self.pca,
+                                                     transformed_background = self.transformed_background, 
+                                                     saving_dir = img_saving_dir,
+                                                     epochs = epochs)
 
-                map_callback = MapDrawingCallback(self,
-                                                  x_sample = self.data.x_val_sample, 
-                                                 y_sample = self.data.y_val_sample,  
-                                                 saving_dir = self.saving_dir, 
-                                                 decoder = self.dec,
-                                                 epochs = epochs)
+            map_callback = MapDrawingCallback(self,
+                                             x_sample = self.data.x_val_sample, 
+                                             y_sample = self.data.y_val_sample,  
+                                             saving_dir = img_saving_dir, 
+                                             decoder = self.dec,
+                                             epochs = epochs)
 
-                callbs = [checkpoint, pca_callback, map_callback]
-            
-            self.train_generator = DataGenerator(data=self.data, batch_size=batch_size, train=True, encoder=self.enc) # encoder is used only if dataset uses stochastic sampling
-            self.val_generator = DataGenerator(data=self.data, batch_size=batch_size, train=False, encoder=self.enc)
-            return self.model.fit(self.train_generator, 
-                                  validation_data = self.val_generator,
-                                  epochs = epochs,
-                                  callbacks = callbs)
-        else:
-            pass
+            callbs += [pca_callback, map_callback]
+
+        self.train_generator = DataGenerator(data=self.data, batch_size=batch_size, train=True, encoder=self.enc) # encoder is used only if dataset uses stochastic sampling
+        self.val_generator = DataGenerator(data=self.data, batch_size=batch_size, train=False, encoder=self.enc)
+        return self.model.fit(self.train_generator, 
+                              validation_data = self.val_generator,
+                              epochs = epochs,
+                              callbacks = callbs)
 
     def predict_large_batch(self, model, large_batch, batch_size = 4):
         res = []
         for batch in range(0, len(large_batch), batch_size):
-            if self.framework == 'tensorflow':
-                pred = model(large_batch[batch : batch + batch_size], training=self.predict_as_training)
-                gc.collect()
-                pred = pred.numpy()
-                if len(pred) == 1 and self.predict_as_training:
-                    print('Prediction is not correct because model predicted batch with one object - in training mode it works incorrect.')
-                    print(f'Change batch_size ({batch_size}), sample size ({len(large_batch)}) or set class attribute predict_as_training=False')
-            else:
-                pass
-                pred = pred.detach().numpy()
+            pred = model(large_batch[batch : batch + batch_size], training=self.predict_as_training)
+            gc.collect()
+            pred = pred.numpy()
+            if len(pred) == 1 and self.predict_as_training:
+                print('Prediction is not correct because model predicted batch with one object - in training mode it works incorrect.')
+                print(f'Change batch_size ({batch_size}), sample size ({len(large_batch)}) or set class attribute predict_as_training=False')
             res.append(pred)
         return np.concatenate(res)
 
@@ -279,13 +250,13 @@ class ModelMaster():
             val_generator = DataGenerator(data=self.data, batch_size=self.batch_size, train=False, shuffle=False)
             return self.predict(val_generator, prediction=prediction)
         y_pred_train = predict_train()
-        r_train = self._pearson(y_pred_train, self.data._y_train)
+        r_train = self.metric(y_pred_train, self.data._y_train)
         y_pred_val = predict_val()
-        r_val = self._pearson(y_pred_val, self.data._y_val)
+        r_val = self.metric(y_pred_val, self.data._y_val)
         gc.collect()
 
-        r_train_negative_control = self._pearson(y_pred_train, np.random.permutation(self.data._y_train))
-        r_val_negative_control = self._pearson(y_pred_val, np.random.permutation(self.data._y_val))
+        r_train_negative_control = self.metric(y_pred_train, np.random.permutation(self.data._y_train))
+        r_val_negative_control = self.metric(y_pred_val, np.random.permutation(self.data._y_val))
         gc.collect()
         r_test = r_test_negative_control = test_chroms = None
         if self.test_data is not None:
@@ -293,8 +264,8 @@ class ModelMaster():
                 test_generator = DataGenerator(data=self.test_data, batch_size=self.batch_size, train=False, shuffle=False)
                 return self.predict(test_generator, prediction=prediction)    
             y_pred_test = predict_test()
-            r_test = self._pearson(y_pred_test, self.test_data._y_val)
-            r_test_negative_control = self._pearson(y_pred_test, np.random.permutation(self.test_data._y_val))
+            r_test = self.metric(y_pred_test, self.test_data._y_val)
+            r_test_negative_control = self.metric(y_pred_test, np.random.permutation(self.test_data._y_val))
             test_chroms = self.test_data.names
             gc.collect()
         plot_score(r_train,
