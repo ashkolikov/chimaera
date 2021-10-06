@@ -4,6 +4,7 @@ import torch
 import numpy as np
 from sklearn.decomposition import PCA
 from skimage.measure import block_reduce
+from scipy.stats import spearmanr
 import json
 import gc
 from .dataset import *
@@ -16,7 +17,8 @@ class ModelMaster():
                  saving_dir = None, 
                  model_dir = None, 
                  rewrite = False,
-                 predict_as_training = True):
+                 predict_as_training = True,
+                metric = 'spearman'):
 
         super(ModelMaster, self).__init__()
 
@@ -29,6 +31,10 @@ class ModelMaster():
             with open(data_params_path, "r") as read_file:
                 data_params = json.load(read_file)
             self.data = DataMaster(**data_params)
+        self.x_train = self.data.x_train
+        self.y_train = self.data.y_train
+        self.x_val = self.data.x_val
+        self.y_val = self.data.y_val
         self.input_len = self.data.dna_len
         self.saving_dir = saving_dir
         self.predict_as_training = predict_as_training
@@ -40,6 +46,7 @@ class ModelMaster():
         self.ae_epochs = 200
         self.batch_size = 8
         self.encoded = False
+        self.metric = metric
 
 
         if os.path.exists(saving_dir) and not rewrite:
@@ -217,6 +224,9 @@ class ModelMaster():
 
     def _pearson(self, x1, x2):
         return [np.corrcoef(i.flat, j.flat)[0,1] for i,j in zip(x1,x2)]
+    
+    def _spearman(self, x1, x2):
+        return [spearmanr(i.flat, j.flat)[0] for i,j in zip(x1,x2)]
 
     def predict(self, x, prediction = 'classical', verbose=1):
         if isinstance(x, DataGenerator):
@@ -246,21 +256,26 @@ class ModelMaster():
         filters = conv[conv_layer - 1].get_weights()[0].T
         return filters
 
-    def score(self, prediction='classical', **kwargs):
+    def score(self, prediction='classical', include_train=True, **kwargs):
+        metric = self._pearson if self.metric == 'pearson' else self._spearman
+        
         def predict_train():
             train_generator = DataGenerator(data=self.data, batch_size=self.batch_size, train=True, shuffle=False)
             return self.predict(train_generator, prediction=prediction)
         def predict_val():
             val_generator = DataGenerator(data=self.data, batch_size=self.batch_size, train=False, shuffle=False)
             return self.predict(val_generator, prediction=prediction)
-        y_pred_train = predict_train()
-        r_train = self.metric(y_pred_train, self.data._y_train)
+        if include_train:
+            y_pred_train = predict_train()
+            r_train = metric(y_pred_train, self.data._y_train)
+            r_train_negative_control = metric(y_pred_train, np.random.permutation(self.data._y_train))
+        else:
+            r_train = r_train_negative_control = None
         y_pred_val = predict_val()
-        r_val = self.metric(y_pred_val, self.data._y_val)
+        r_val = metric(y_pred_val, self.data._y_val)
         gc.collect()
 
-        r_train_negative_control = self.metric(y_pred_train, np.random.permutation(self.data._y_train))
-        r_val_negative_control = self.metric(y_pred_val, np.random.permutation(self.data._y_val))
+        r_val_negative_control = metric(y_pred_val, np.random.permutation(self.data._y_val))
         gc.collect()
         r_test = r_test_negative_control = test_chroms = None
         if self.test_data is not None:
@@ -268,11 +283,12 @@ class ModelMaster():
                 test_generator = DataGenerator(data=self.test_data, batch_size=self.batch_size, train=False, shuffle=False)
                 return self.predict(test_generator, prediction=prediction)    
             y_pred_test = predict_test()
-            r_test = self.metric(y_pred_test, self.test_data._y_val)
-            r_test_negative_control = self.metric(y_pred_test, np.random.permutation(self.test_data._y_val))
+            r_test = metric(y_pred_test, self.test_data._y_val)
+            r_test_negative_control = metric(y_pred_test, np.random.permutation(self.test_data._y_val))
             test_chroms = self.test_data.names
             gc.collect()
-        plot_score(r_train,
+        plot_score(self.metric,
+                   r_train,
                    r_train_negative_control,
                    r_val,
                    r_val_negative_control,
@@ -356,6 +372,8 @@ class ModelMaster():
             params['cut_chromosome_ends'] = cut_chromosome_ends
         self.test_data = DataMaster(**params)
         self.train_generator = DataGenerator(data=self.test_data, batch_size=self.batch_size, train=False, encoder=self.enc)
+        self.x_test = self.test_data.x_val
+        self.y_test = self.test_data.y_val
 
     def graphic_analisis(self, num, n_layers=3, theme='dark', color_shifts={'heatmap': 50, 'filters': 200},  aggregation='max', return_filters=False):
         first_layers = tf.keras.models.Sequential(self.model.layers[:n_layers])
