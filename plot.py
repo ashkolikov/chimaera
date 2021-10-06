@@ -191,7 +191,8 @@ def plot_latent_mapping(maps, latent, background):
 def plot_mutations(maps, titles):
     pass
 
-def plot_score(r_train,
+def plot_score(metric_name,
+                   r_train,
                    r_train_negative_control,
                    r_val,
                    r_val_negative_control,
@@ -205,7 +206,7 @@ def plot_score(r_train,
     if test_names:
         test_names = ', '.join(test_names)
 
-    df = pd.DataFrame(columns=['Pearson correlation coefficient',
+    df = pd.DataFrame(columns=['Correlation coefficient',
                             'Sample',
                             'Order'])
     data = [r_train,
@@ -222,14 +223,14 @@ def plot_score(r_train,
         data_ = np.array([values, [sample]*len(values), [order]*len(values)]).T
         new_df = pd.DataFrame(data= data_, columns=df.columns)
         df = df.append(new_df, ignore_index=True)
-    df = df.astype({'Pearson correlation coefficient': float})
+    df = df.astype({'Correlation coefficient': float})
 
     plt.figure(figsize=(16,9))
     if kind == 'violin':
-        box_plot = sns.violinplot(x="Sample", y="Pearson correlation coefficient", hue="Order", data=df, palette=cmap, inner=None)
+        box_plot = sns.violinplot(x="Sample", y="Correlation coefficient", hue="Order", data=df, palette=cmap, inner=None)
     else:
-        box_plot = sns.boxplot(x="Sample", y="Pearson correlation coefficient", hue="Order", data=df, palette=cmap)
-    Means = df.groupby(['Sample', 'Order'])['Pearson correlation coefficient'].mean()
+        box_plot = sns.boxplot(x="Sample", y="Correlation coefficient", hue="Order", data=df, palette=cmap)
+    Means = df.groupby(['Sample', 'Order'])['Correlation coefficient'].mean()
 
     for i, xtick in enumerate(box_plot.get_xticklabels()):
         xtick = xtick.get_text()
@@ -241,4 +242,6 @@ def plot_score(r_train,
                     f"Mean:\n{Means[xtick]['permuted']:.2f}", 
                     horizontalalignment='center', color='w', weight='semibold', fontsize=15)
         txt.set_path_effects([PathEffects.withStroke(linewidth=2, foreground='black')])
+    plt.title(metric_name.capitalize()+' correlations')
+    plt.show()
             
