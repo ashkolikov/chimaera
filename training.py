@@ -236,6 +236,10 @@ class ModelMaster():
                 return self.dec.predict(self.model.predict(x, verbose=verbose))
             else:
                 return self.predict_large_batch(self.dec, self.predict_large_batch(self.model, x, self.batch_size), 64)
+            
+    def predict_and_plot(self, x, hic_cmap='Reds', prediction = 'classical'):
+        y = self.predict(x, prediction = prediction, verbose=0)
+        plot_map(y, hic_cmap = hic_cmap)
     
     def get_filters(self, conv_layer):
         conv = [i for i in self.model.layers if 'conv' in i.name]
