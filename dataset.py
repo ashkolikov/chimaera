@@ -19,8 +19,9 @@ class DataMaster(object):
                  hic_file, 
                  genome_file_or_dir, 
                  fragment_length,
-                 chroms_to_exclude,
                  sigma,
+                 chroms_to_exclude = [],
+                 chroms_to_include = [],
                  scale = (0, 1),
                  normalize = 'global',
                  min_max = (None, None),
@@ -51,6 +52,7 @@ class DataMaster(object):
         self.dna_encoding = dna_encoding
         self.sample_seed = sample_seed
         self.chroms_to_exclude = chroms_to_exclude
+        self.chroms_to_include = chroms_to_include
         self.min_max = min_max
 
         self.scale = scale
@@ -58,7 +60,7 @@ class DataMaster(object):
         self.sigma = sigma
 
         self.cooler = Cooler(hic_file)
-        self.make_dna(genome_file_or_dir, chroms_to_exclude)
+        self.make_dna(genome_file_or_dir, chroms_to_exclude, chroms_to_include)
         self._x_train, self._x_val, self._y_train, self._y_val = self.split_data()
         self.scale_y()
         self.x_train, self.y_train  = DNALoader(self, self._x_train), HiCLoader(self, self._y_train)
@@ -69,8 +71,9 @@ class DataMaster(object):
         self.params = {'hic_file': hic_file, 
                        'genome_file_or_dir': genome_file_or_dir, 
                        'fragment_length': fragment_length,
-                        'chroms_to_exclude': chroms_to_exclude,
-                        'sigma': sigma,
+                       'chroms_to_exclude': self.chroms_to_exclude,
+                       'chroms_to_include': self.chroms_to_include,
+                       'sigma': sigma,
                         'scale': scale,
                         'normalize': normalize,
                         'map_size': map_size,
@@ -83,12 +86,18 @@ class DataMaster(object):
                         'cut_chromosome_ends': cut_chromosome_ends,
                         'sample_seed': sample_seed}
 
-    def make_dna(self, genome_file_or_dir, exclude):
+    def make_dna(self, genome_file_or_dir, exclude, include):
         self.DNA = dict()
         self.names = []
         if os.path.isdir(genome_file_or_dir):
             files_in_dir = os.listdir(genome_file_or_dir)
-            availible_files = [i for i in files_in_dir if (i.split('.')[0] not in exclude and i.split('.')[0] in self.cooler.chromnames)]
+            if include != []:
+                availible_files = [i for i in files_in_dir if (i.split('.')[0] in include and i.split('.')[0] in self.cooler.chromnames)]
+            elif exclude != []:
+                availible_files = [i for i in files_in_dir if (i.split('.')[0] not in exclude and i.split('.')[0] in self.cooler.chromnames)]
+            else:
+                raise ValueError('You should select not all chromosomes for test&val samples')
+            
             for file in availible_files:
                 fasta = next(SeqIO.parse(os.path.join(genome_file_or_dir, file), "fasta"))
                 self.DNA[fasta.name] = str(fasta.seq).lower()
@@ -99,9 +108,16 @@ class DataMaster(object):
             gen = SeqIO.parse(genome_file_or_dir, "fasta")
             for fasta in gen:
                 name = fasta.name
-                if name in exclude or name not in self.cooler.chromnames:
-                    del fasta
-                    continue
+                if include != []:
+                    if name not in include or name not in self.cooler.chromnames:
+                        del fasta
+                        continue 
+                elif exclude != []:
+                    if name in exclude or name not in self.cooler.chromnames:
+                        del fasta
+                        continue
+                else:
+                    raise ValueError('You should select not all chromosomes for test&val samples')        
                 self.DNA[name] = str(fasta.seq).lower()
                 self.names.append(name)
                 print(f'DNA data for {fasta.name} is loaded')
