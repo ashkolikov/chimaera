@@ -47,9 +47,10 @@ class ModelMaster():
         self.batch_size = 8
         self.encoded = False
         self.metric = metric
-
-
-        if os.path.exists(saving_dir) and not rewrite:
+        
+        if saving_dir is None:
+            pass
+        elif os.path.exists(saving_dir) and not rewrite:
             raise ValueError(f"Type a new directory name for saving model or delete the existing one named {saving_dir}")
         elif os.path.exists(saving_dir) and rewrite:
             pass
