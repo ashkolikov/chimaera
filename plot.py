@@ -215,11 +215,16 @@ def plot_score(metric_name,
             r_val_negative_control,
             r_test,
             r_test_negative_control]
-    data = [i for i in data if i is not None]
     for i, values, in enumerate(data):
+        if values is None:
+            continue
         order = 'correct' if not i % 2 else 'permuted'
-        sample = 'val' if i < 4 else 'test'
-        sample = 'train' if i < 2 else sample
+        if i in [0,1]:
+            sample = 'train'
+        elif i in [2,3]:
+            sample = 'val'
+        else:
+            sample = 'test'
         data_ = np.array([values, [sample]*len(values), [order]*len(values)]).T
         new_df = pd.DataFrame(data= data_, columns=df.columns)
         df = df.append(new_df, ignore_index=True)
