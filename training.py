@@ -17,8 +17,7 @@ class ModelMaster():
                  saving_dir = None, 
                  model_dir = None, 
                  rewrite = False,
-                 predict_as_training = True,
-                metric = 'spearman'):
+                 predict_as_training = True):
 
         super(ModelMaster, self).__init__()
 
@@ -46,7 +45,6 @@ class ModelMaster():
         self.ae_epochs = 200
         self.batch_size = 8
         self.encoded = False
-        self.metric = metric
         
         if saving_dir is None:
             pass
@@ -257,8 +255,9 @@ class ModelMaster():
         filters = conv[conv_layer - 1].get_weights()[0].T
         return filters
 
-    def score(self, prediction='classical', include_train=True, **kwargs):
-        metric = self._pearson if self.metric == 'pearson' else self._spearman
+    def score(self, metric='spearman', prediction='classical', include_train=True, **kwargs):
+        metric_name = metric
+        metric = self._pearson if metric_name == 'pearson' else self._spearman
         
         def predict_train():
             train_generator = DataGenerator(data=self.data, batch_size=self.batch_size, train=True, shuffle=False)
@@ -288,7 +287,7 @@ class ModelMaster():
             r_test_negative_control = metric(y_pred_test, np.random.permutation(self.test_data._y_val))
             test_chroms = self.test_data.names
             gc.collect()
-        plot_score(self.metric,
+        plot_score(metric_name,
                    r_train,
                    r_train_negative_control,
                    r_val,
