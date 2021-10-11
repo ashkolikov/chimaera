@@ -74,10 +74,13 @@ class ModelMaster():
             self.train_generator = DataGenerator(data=self.data, batch_size=self.batch_size, train=True, encoder=self.enc) # encoder is used only if dataset uses stochastic sampling
             self.val_generator = DataGenerator(data=self.data, batch_size=self.batch_size, train=False, encoder=self.enc)
             
-    def build(self, enc, dec, model):
-        self.build_enc(enc)
-        self.build_dec(dec)
-        self.build_model(model)
+    def build(self, neural_net):
+        neural_net.update(input_len = self.data.dna_len,
+                          map_size = self.data.map_size,
+                          output_scale = self.data.scale)
+        self.build_enc(neural_net.enc)
+        self.build_dec(neural_net.dec)
+        self.build_model(neural_net.model)
     
     def build_enc(self, fun, weights=None):
         if fun is not None:
