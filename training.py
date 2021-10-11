@@ -31,7 +31,7 @@ class ModelMaster():
                 data_params_path = data
             with open(data_params_path, "r") as read_file:
                 data_params = json.load(read_file)
-            if genome_file is None or hic_file is None:
+            if genome_file_or_dir is None or hic_file is None:
                 raise ValueError('Indicate pathes to genome and Hi-C maps files')
             data_params['hic_file'] = hic_file
             data_params['genome_file_or_dir'] = genome_file_or_dir
