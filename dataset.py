@@ -106,7 +106,9 @@ graphic monitoring, doesn't affect anyting important
         self.x_val, self.y_val  = DNALoader(self, self._x_val), HiCLoader(self, self._y_val)
         self.make_sample()
         
-        self.params = {'fragment_length': fragment_length,
+        self.params = {'hic_file': hic_file, 
+                        'genome_file_or_dir': genome_file_or_dir,
+                        'fragment_length': fragment_length,
                        'chroms_to_exclude': self.chroms_to_exclude,
                        'chroms_to_include': self.chroms_to_include,
                        'sigma': sigma,
