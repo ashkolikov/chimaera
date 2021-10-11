@@ -14,7 +14,46 @@ from Bio import SeqIO
 from .plot import *
 
 class DataMaster(object):
-    """docstring for DataMaster"""
+    """Loads data for training
+    
+     hic_file: path to file with Hi-c maps;
+     genome_file_or_dir: path to genome fasta file or to folder
+with chromosomes' files;
+     fragment_length: length of a DNA fragment;
+     sigma: sigma in gaussian filter for maps;
+     chroms_to_exclude: chomosomes not used in training;
+     chroms_to_include: chomosomes used in training - if both args
+are not None chroms_to_include is a priority;
+     scale: None (no scaling) or tuple of ints, scaling values in Hi-C maps.
+Note that it affects the decoder last layer activation function;
+     normalize: scale using global min&max ('gloabal') or each scal map
+separately ('each');
+     min_max: min and max for scaling, is used when adding smth to
+the dataset, technical arguement;
+     map_size: map size in pixels;
+     nan_threshold: highest permissible percentage of missing values in
+a map;
+     rev_comp: stochastic reverse complement while training;
+     stochastic_sampling: sample with random shifts along the genome while
+training (works not good in most cases);
+     shift_repeats: sample with fixed shifts along the genome while
+training (e.g. if shift_repeats is 4, each position in the genome will be
+presented in the sample for times in fragments with a shift of 1/4 of their
+length). Note that this argument increases the size of the dataset;
+     expand_dna: use DNA context for prediction (a half of a fragment length
+at both sides);
+     dna_encoding: 'one-hot' or 'embedding';
+     val_split: describin validation sample generation. Is a tuple of a word:
+        'first' - first n in sample
+        'last' - last n in sample
+        'random'
+        chromosome name + position of center (e.g. 'chr5 24510000'),
+and a number - integer (number of objects in sample) or a proportion;
+     cut_chromosome_ends: number of nucleotides to cut at both ends of each
+chromosome;
+     sample_seed: seed for random subsample of the validation sample used for
+graphic monitoring, doesn't affect anyting important
+    """
     def __init__(self,
                  hic_file, 
                  genome_file_or_dir, 
@@ -39,7 +78,7 @@ class DataMaster(object):
         if stochastic_sampling and (shift_repeats > 1):
             raise ValueError("Stochastic sampling and shift_repeats can't be used together")
         if (val_split[0] == 'random') and (stochastic_sampling or (shift_repeats > 1)):
-            raise ValueError("Random sampling is incorrect in not fixed dataset")
+            raise ValueError("Random split is incorrect in not fixed dataset")
         self.mapped_len = fragment_length
         self.map_size = map_size
         self.nan_threshold = nan_threshold
@@ -66,11 +105,8 @@ class DataMaster(object):
         self.x_train, self.y_train  = DNALoader(self, self._x_train), HiCLoader(self, self._y_train)
         self.x_val, self.y_val  = DNALoader(self, self._x_val), HiCLoader(self, self._y_val)
         self.make_sample()
-        #self.x_train, self.x_val, self.y_train, self.y_val = extra_data
         
-        self.params = {'hic_file': hic_file, 
-                       'genome_file_or_dir': genome_file_or_dir, 
-                       'fragment_length': fragment_length,
+        self.params = {'fragment_length': fragment_length,
                        'chroms_to_exclude': self.chroms_to_exclude,
                        'chroms_to_include': self.chroms_to_include,
                        'sigma': sigma,
@@ -87,6 +123,7 @@ class DataMaster(object):
                         'sample_seed': sample_seed}
 
     def make_dna(self, genome_file_or_dir, exclude, include):
+        '''Makes a dict of chromosomes' sequences'''
         self.DNA = dict()
         self.names = []
         if os.path.isdir(genome_file_or_dir):
@@ -126,6 +163,7 @@ class DataMaster(object):
         print()
 
     def transform_hic(self, hic_matrix_raw, hic_matrix):
+        '''Transformations on Hi-C maps'''
         transformed_arr = adaptive_coarsegrain(hic_matrix_raw, hic_matrix)
         nan_mask = np.isnan(transformed_arr)
         transformed_arr, _,_,_ = observed_over_expected(transformed_arr, mask = ~nan_mask)
@@ -134,12 +172,13 @@ class DataMaster(object):
         return transformed_arr, np.mean(nan_mask)
 
     def get_region(self, name, start, end):
+        '''Get Hi-C map by position'''
         mtx_raw = self.balanced.fetch(f'{name}:{start}-{end}')
         mtx_balanced = self.not_balanced.fetch(f'{name}:{start}-{end}')
-        #print(mtx_raw.shape)
         return self.transform_hic(mtx_raw, mtx_balanced)
 
     def split_data(self):
+        '''Split genome and Hi-C data into fragments and distribute them between train and validation samples'''
         resolution = self.cooler.binsize
         brim_len = 0 if not self.expand_dna else self.mapped_len // 2
         self.dna_len = self.mapped_len + brim_len * 2
@@ -155,7 +194,7 @@ class DataMaster(object):
         self.slice_mapped_len = self.mapped_len if not use_big_map else self.mapped_len * 2
         real_map_size = self.map_size if not use_big_map else self.map_size * 2
         if use_big_map:
-            print(f'Initial dataset contains {real_map_size}x{real_map_size} maps, overlooping in {self.map_size} pixels')
+            print(f'Initial dataset contains {real_map_size}x{real_map_size} maps, overlaping in {self.map_size} pixels')
             print(f'{self.map_size}x{self.map_size} maps for training will be sampled from them, maps for testing are their top left fragments')
 
         self.balanced, self.not_balanced = self.cooler.matrix(balance=True), self.cooler.matrix(balance=False)
@@ -252,6 +291,7 @@ class DataMaster(object):
 
 
     def scale_y(self):
+        '''Scale Hi-C maps to some interval'''
         if self.scale is None:
             return
         else:
@@ -291,6 +331,7 @@ class DataMaster(object):
         gc.collect()
 
     def make_sample(self, seed=None):
+        '''Make a small subsample of the validation sample for visulization'''
         if len(self.y_val)<9:
             return
         if seed is None:
@@ -391,6 +432,7 @@ class HiCLoader():
 
 
 class DataGenerator(Sequence):
+    '''For loading into model'''
     def __init__(self, data, train, batch_size = 4, shuffle = True, encoder = None):
         if train:
             self.X = data.x_train
@@ -453,6 +495,7 @@ class DataGenerator(Sequence):
 
 
 class HiCDataGenerator(Sequence):
+    '''For loading into model'''
     def __init__(self, data, rotate = True, shuffle = True):
         self.X = data.y_train
         self.batch_size = 64
