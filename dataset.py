@@ -41,7 +41,7 @@ training (e.g. if shift_repeats is 4, each position in the genome will be
 presented in the sample for times in fragments with a shift of 1/4 of their
 length). Note that this argument increases the size of the dataset;
      expand_dna: use DNA context for prediction (a half of a fragment length
-at both sides);
+at both sides). Note that this argument increases the size of the dataset twice;
      dna_encoding: 'one-hot' or 'embedding';
      val_split: describin validation sample generation. Is a tuple of a word:
         'first' - first n in sample
