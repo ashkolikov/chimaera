@@ -14,6 +14,8 @@ class ModelMaster():
     """Contains model and functions to work with it"""
     def __init__(self, 
                  data = None,
+                 genome_file_or_dir = None,
+                 hic_file = None,
                  saving_dir = None, 
                  model_dir = None, 
                  rewrite = False,
@@ -29,6 +31,10 @@ class ModelMaster():
                 data_params_path = data
             with open(data_params_path, "r") as read_file:
                 data_params = json.load(read_file)
+            if genome_file is None or hic_file is None:
+                raise ValueError('Indicate pathes to genome and Hi-C maps files')
+            data_params['hic_file'] = hic_file
+            data_params['genome_file_or_dir'] = genome_file_or_dir
             self.data = DataMaster(**data_params)
         self.x_train = self.data.x_train
         self.y_train = self.data.y_train
