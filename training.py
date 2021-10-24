@@ -372,7 +372,7 @@ class ModelMaster():
         y_pred = self.predict(gen, prediction=prediction)
         mae = np.abs(y_pred - y_true)
         map = mae.mean(axis=(0,3))
-        plt.figure(figsiz=(10,10))
+        plt.figure(figsize=(10,10))
         plt.imshow(map, cmap=cmap)
         plt.show()
 
