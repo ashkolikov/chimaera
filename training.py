@@ -18,7 +18,7 @@ class ModelMaster():
                  saving_dir = None, 
                  model_dir = None, 
                  rewrite = False,
-                 predict_as_training = True):
+                 predict_as_training = False):
 
         super(ModelMaster, self).__init__()
 
