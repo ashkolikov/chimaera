@@ -142,7 +142,10 @@ class ModelMaster():
             print("Model won't be saved while training")
             return
         with open(os.path.join(self.saving_dir, 'data_params.json'), 'w') as file:
-                  file.write(json.dumps(self.data.params))
+            params = self.data.params.copy()
+            del params['hic_file']
+            del params['genome_file_or_dir']
+            file.write(json.dumps(params))
         self.enc.save(os.path.join(self.saving_dir, 'enc.h5'))
         self.dec.save(os.path.join(self.saving_dir, 'dec.h5'))
         if save_main_model:
