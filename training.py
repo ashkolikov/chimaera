@@ -358,7 +358,7 @@ class ModelMaster():
         latent = self.hic_to_latent(y_val)
         plot_latent_mapping(y_val, self.pca(latent), self.transformed_background)
     
-    def mistake_map(self, sample='val', prediction='classical', cmap='RdYlGn_r'):
+    def mistake_map(self, sample='val', prediction='classical', cmap='RdYlGn_r', adjust=False):
         if sample == 'val' or sample == 'valid':
             gen = DataGenerator(data=self.data, batch_size=self.batch_size, train=False, shuffle=False)
             y_true = self.y_val[:]
@@ -374,7 +374,11 @@ class ModelMaster():
         del y_pred, y_true, mae
         gc.collect()
         plt.figure(figsize=(7,7))
-        plt.imshow(map, cmap=cmap)
+        if adjust:
+            heatmap = plt.imshow(map, cmap=cmap, vmin=0, vmax=1)
+        else:
+            heatmap = plt.imshow(map, cmap=cmap)
+        plt.colorbar(heatmap)
         plt.show()
 
     def plot_filters(self, figsize = (16, 10), cmap = 'coolwarm', normalize=False):
