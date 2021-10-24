@@ -1,6 +1,5 @@
 import os
 import tensorflow as tf
-import torch
 import numpy as np
 from sklearn.decomposition import PCA
 from skimage.measure import block_reduce
@@ -359,20 +358,22 @@ class ModelMaster():
         latent = self.hic_to_latent(y_val)
         plot_latent_mapping(y_val, self.pca(latent), self.transformed_background)
     
-    def mistake_map(self, sample='val', prediction='classical', cmap='inferno'):
+    def mistake_map(self, sample='val', prediction='classical', cmap='RdYlGn_r'):
         if sample == 'val' or sample == 'valid':
             gen = DataGenerator(data=self.data, batch_size=self.batch_size, train=False, shuffle=False)
-            y_true = self.y_val
+            y_true = self.y_val[:]
         elif sample == 'train':
             gen = DataGenerator(data=self.data, batch_size=self.batch_size, train=True, shuffle=False)
-            y_true = self.y_train
+            y_true = self.y_train[:]
         elif sample == 'test':
             gen = DataGenerator(data=self.test_data, batch_size=self.batch_size, train=False, shuffle=False)
-            y_true = self.y_test
+            y_true = self.y_test[:]
         y_pred = self.predict(gen, prediction=prediction)
         mae = np.abs(y_pred - y_true)
         map = mae.mean(axis=(0,3))
-        plt.figure(figsize=(10,10))
+        del y_pred, y_true, mae
+        gc.collect()
+        plt.figure(figsize=(7,7))
         plt.imshow(map, cmap=cmap)
         plt.show()
 
