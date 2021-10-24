@@ -267,20 +267,15 @@ class ModelMaster():
     def score(self, metric='spearman', prediction='classical', include_train=True, **kwargs):
         metric_name = metric
         metric = self._pearson if metric_name == 'pearson' else self._spearman
-        
-        def predict_train():
-            train_generator = DataGenerator(data=self.data, batch_size=self.batch_size, train=True, shuffle=False)
-            return self.predict(train_generator, prediction=prediction)
-        def predict_val():
-            val_generator = DataGenerator(data=self.data, batch_size=self.batch_size, train=False, shuffle=False)
-            return self.predict(val_generator, prediction=prediction)
         if include_train:
-            y_pred_train = predict_train()
+            train_generator = DataGenerator(data=self.data, batch_size=self.batch_size, train=True, shuffle=False)
+            y_pred_train = self.predict(train_generator, prediction=prediction)
             r_train = metric(y_pred_train, self.data._y_train)
             r_train_negative_control = metric(y_pred_train, np.random.permutation(self.data._y_train))
         else:
             r_train = r_train_negative_control = None
-        y_pred_val = predict_val()
+        val_generator = DataGenerator(data=self.data, batch_size=self.batch_size, train=False, shuffle=False)    
+        y_pred_val = self.predict(val_generator, prediction=prediction)
         r_val = metric(y_pred_val, self.data._y_val)
         gc.collect()
 
@@ -288,10 +283,8 @@ class ModelMaster():
         gc.collect()
         r_test = r_test_negative_control = test_chroms = None
         if self.test_data is not None:
-            def predict_test():
-                test_generator = DataGenerator(data=self.test_data, batch_size=self.batch_size, train=False, shuffle=False)
-                return self.predict(test_generator, prediction=prediction)    
-            y_pred_test = predict_test()
+            test_generator = DataGenerator(data=self.test_data, batch_size=self.batch_size, train=False, shuffle=False)       
+            y_pred_test = self.predict(test_generator, prediction=prediction) 
             r_test = metric(y_pred_test, self.test_data._y_val)
             r_test_negative_control = metric(y_pred_test, np.random.permutation(self.test_data._y_val))
             test_chroms = self.test_data.names
