@@ -355,6 +355,23 @@ class ModelMaster():
             raise ValueError('sample should contain 8 maps')
         latent = self.hic_to_latent(y_val)
         plot_latent_mapping(y_val, self.pca(latent), self.transformed_background)
+    
+    def mistake_map(self, sample='val', prediction='classical', cmap='inferno'):
+        if sample == 'val' or sample == 'valid':
+            gen = DataGenerator(data=self.data, batch_size=self.batch_size, train=False, shuffle=False)
+            y_true = self.y_val
+        elif sample == 'train':
+            gen = DataGenerator(data=self.data, batch_size=self.batch_size, train=True, shuffle=False)
+            y_true = self.y_train
+        elif sample == 'test':
+            gen = DataGenerator(data=self.test_data, batch_size=self.batch_size, train=False, shuffle=False)
+            y_true = self.y_test
+        y_pred = self.predict(gen, prediction=prediction)
+        mae = np.abs(y_pred - y_true)
+        map = mae.mean(axis=(0,3))
+        plt.figure(figsiz=(10,10))
+        plt.imshow(map, cmap=cmap)
+        plt.show()
 
     def plot_filters(self, figsize = (16, 10), cmap = 'coolwarm', normalize=False):
         filters = self.model.layers[0].get_weights()[0].T
