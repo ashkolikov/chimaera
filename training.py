@@ -350,7 +350,7 @@ class ModelMaster():
 
     def plot_latent_mapping(self, y_val = None):
         if y_val is None:
-            y_val = self.y_val_sample[:8]
+            y_val = self.data.y_val_sample[:8]
         elif len(y_val) > 8:
             y_val = y_val [:8]
         elif len(y_val) < 8:
