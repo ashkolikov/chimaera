@@ -451,7 +451,7 @@ class MapDrawingCallback(tf.keras.callbacks.Callback):
         if not os.path.exists(self.saving_dir):
             os.mkdir(self.saving_dir)
         if os.listdir(self.saving_dir):
-            self.intit_epoch = int(os.listdir(self.saving_dir)[-1].split('.')[0])
+            self.intit_epoch = int(os.listdir(self.saving_dir)[-1].split('_')[0])
         else:
             self.intit_epoch = 1
 
