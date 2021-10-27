@@ -1,0 +1,22 @@
+name: chimaera
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python>=3.7
+  - matplotlib-base
+  - pandas
+  - seaborn
+  - scipy
+  - scikit-image
+  - biopython>=1.79
+  - cython
+  - pip
+  - pip:
+    - bioframe==0.2.0
+    - cooler==0.8.11
+    - cooltools==0.4.1
+    - scikit-learn
+    - tensorflow-gpu>=2.0
+    - numpy==1.20.0
