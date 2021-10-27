@@ -375,7 +375,7 @@ class ModelMaster():
         gc.collect()
         plt.figure(figsize=(7,7))
         if adjust:
-            heatmap = plt.imshow(map, cmap=cmap, vmin=0, vmax=1)
+            heatmap = plt.imshow(map, cmap=cmap, vmin=0)
         else:
             heatmap = plt.imshow(map, cmap=cmap)
         plt.colorbar(heatmap)
