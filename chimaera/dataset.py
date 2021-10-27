@@ -135,7 +135,8 @@ graphic monitoring, doesn't affect anyting important
             elif exclude != []:
                 availible_files = [i for i in files_in_dir if (i.split('.')[0] not in exclude and i.split('.')[0] in self.cooler.chromnames)]
             else:
-                raise ValueError('You should select not all chromosomes for test&val samples')
+                print("If it's possible you should select not all chromosomes for test&val samples")
+                availible_files = [i for i in files_in_dir if  i.split('.')[0] in self.cooler.chromnames]
             
             for file in availible_files:
                 fasta = next(SeqIO.parse(os.path.join(genome_file_or_dir, file), "fasta"))
