@@ -1,0 +1,19 @@
+__pycache__
+chimaera/__pycache__
+chimaera/*/__pycache__
+
+*.egg-info/
+*.egg
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+coverage.xml
+.pytest_cache
+
+tests/data/
+data/
+.ipynb_checkpoints/

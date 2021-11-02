@@ -28,5 +28,6 @@ pip install -e .
 
 Enable Jupyter support: 
 ```bash
+pip install ipykernel
 python -m ipykernel install --user --name chimaera --display-name "chimaera"
 ```

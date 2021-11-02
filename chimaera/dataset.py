@@ -1,376 +1,279 @@
-import os
 import gc
+import functools
 
 import numpy as np
-from tensorflow.keras.utils import to_categorical, Sequence
-from sklearn.model_selection import train_test_split
-from scipy.ndimage import rotate, zoom, gaussian_filter
-
+from tensorflow.keras.utils import Sequence
+from .utils import *
 
 from cooler import Cooler
-from cooltools.lib.numutils import interp_nan, observed_over_expected, adaptive_coarsegrain
-from Bio import SeqIO
+import cooltools.snipping
+from cooltools.lib.numutils import zoom_array
+from scipy.ndimage import zoom
+from functools import partial
+
+from multiprocessing import Pool
 
 from .plot import *
 
 class DataMaster(object):
     """Loads data for training
     
-     hic_file: path to file with Hi-c maps;
-     genome_file_or_dir: path to genome fasta file or to folder
+     hic_file: path to file with Hi-С maps;
+     genome_path: path to genome fasta file or to folder
 with chromosomes' files;
-     fragment_length: length of a DNA fragment;
+     dna_fragment_length: length of a DNA fragment associated with each sample (X);
+     hic_fragment_length: size of Hi-C snippet associated with each sample (y);
      sigma: sigma in gaussian filter for maps;
      chroms_to_exclude: chomosomes not used in training;
-     chroms_to_include: chomosomes used in training - if both args
-are not None chroms_to_include is a priority;
-     scale: None (no scaling) or tuple of ints, scaling values in Hi-C maps.
-Note that it affects the decoder last layer activation function;
-     normalize: scale using global min&max ('gloabal') or each scal map
-separately ('each');
-     min_max: min and max for scaling, is used when adding smth to
-the dataset, technical arguement;
-     map_size: map size in pixels;
-     nan_threshold: highest permissible percentage of missing values in
-a map;
+     chroms_to_include: chomosomes used in training - if both args are not None chroms_to_include is a priority;
+     viewframe_path: path to file with tsv chrom-start-end genomic regions;
+     blacklist_path: path to file with tsv chrom-start-end of blacklist regions. Any region overlapping blacklisted will be removed.
+     nthreads_snipper: number of threads for snipping
+     scale: None (no scaling) or tuple of ints, scaling values in Hi-C maps. Note that it affects the decoder last layer activation function.
+     normalize: scale using global min&max ('gloabal') or each scal map separately ('each');
+     min_max: min and max for scaling, is used when adding smth to the dataset, technical arguement;
+     zoomify_map_to: map size in pixels, the one that will be subjected to autoencoder, leave None if preserving original size;
+     nan_threshold: highest permissible percentage of missing values in a map;
      rev_comp: stochastic reverse complement while training;
-     stochastic_sampling: sample with random shifts along the genome while
-training (works not good in most cases);
-     shift_repeats: sample with fixed shifts along the genome while
-training (e.g. if shift_repeats is 4, each position in the genome will be
-presented in the sample for times in fragments with a shift of 1/4 of their
-length). Note that this argument increases the size of the dataset;
+     stochastic_sampling: sample with random shifts along the genome while training (works not good in most cases);
+     shift_repeats: sample with fixed shifts along the genome while training (e.g. if shift_repeats is 4, each position in the genome will be
+        presented in the sample for times in fragments with a shift of 1/4 of their length). Note that this argument increases the size of the dataset;
      expand_dna: use DNA context for prediction (a half of a fragment length
-at both sides). Note that this argument increases the size of the dataset twice;
+        at both sides). Note that this argument increases the size of the dataset twice;
      dna_encoding: 'one-hot' or 'embedding';
-     val_split: describin validation sample generation. Is a tuple of a word:
+     val_split: scheme of validation sample generation. Is a tuple of a word:
         'first' - first n in sample
         'last' - last n in sample
         'random'
-        chromosome name + position of center (e.g. 'chr5 24510000'),
-and a number - integer (number of objects in sample) or a proportion;
-     cut_chromosome_ends: number of nucleotides to cut at both ends of each
-chromosome;
-     sample_seed: seed for random subsample of the validation sample used for
-graphic monitoring, doesn't affect anyting important
+        chromosome name + position of center (e.g. 'chr5 24510000'), and a number - integer (number of objects in sample) or a proportion;
+     sample_seed: seed for random subsample of the validation sample used for graphic monitoring, doesn't affect anyting important.
+
+
+    Class attributes:
+    Private:
+        _cooler
+        _bin_table - table of genomic bines used for samples creatin. Each bin is a window center for the region.
+        _viewframe - genomic regions (chromosomes or chromosomal arms)
+        _DNA
+        _min_max
+        _names
+        _snipper - snipper that loads the snips
+        _mapped_len - size of DNA for one sample
+        _dna_len - real size of DNA for one sample
+        _binsize - resolution of Hi-C maps provided with cooler
+        _zoom_rate - zoom rate for making Hi-C maps fitting the required window size
+        _idx_x_train, _idx_x_val, _idx_y_train,_idx_y_val - indexes of samples in the bin table
+        _hic_window_table - table of genomic windows for Hi-C in samples, chrom-start-end format, generated by snipping.make_bin_aligned_windows with hic_fragment_length
+        _dna_window_table - table of genomic windows for DNA in samples, chrom-start-end format, generated by snipping.make_bin_aligned_windows with dna_fragment_length
+
+    Public:
+        run_params - list of parameters used for the run
+        x_val_sample, y_val_sample, x_train_sample, y_train_sample - subsamples of real data for visualization
+        x_train, x_val - DNA of the samples encoded by DNALoader
+        y_train, y_val - Hi-C snippets of the samples encoded by HiCLoader
+
     """
     def __init__(self,
-                 hic_file, 
-                 genome_file_or_dir, 
-                 fragment_length,
-                 sigma,
+                 cool_path,
+                 genome_path,
+                 dna_fragment_length,
+                 hic_fragment_length,
+                 viewframe = None,
+                 blacklist = None,
                  chroms_to_exclude = [],
                  chroms_to_include = [],
+                 nthreads_snipper=1,
+                 sigma=None,
                  scale = (0, 1),
-                 normalize = 'global',
+                 norm_regime = 'global',
                  min_max = (None, None),
-                 map_size = 64,
+                 final_snip_size = 64,
                  nan_threshold = 0.2,
                  rev_comp = False,
                  stochastic_sampling = False,
                  shift_repeats = 1,
                  expand_dna = True,
                  dna_encoding = 'one-hot',
-                 val_split = ('first', 32),
-                 cut_chromosome_ends = 0,
+                 split_method = ('first', 500),
                  sample_seed = 0):
 
         if stochastic_sampling and (shift_repeats > 1):
             raise ValueError("Stochastic sampling and shift_repeats can't be used together")
-        if (val_split[0] == 'random') and (stochastic_sampling or (shift_repeats > 1)):
+        if (split_method[0] == 'random') and (stochastic_sampling or (shift_repeats > 1)):
             raise ValueError("Random split is incorrect in not fixed dataset")
-        self.mapped_len = fragment_length
-        self.map_size = map_size
-        self.nan_threshold = nan_threshold
-        self.stochastic_sampling = stochastic_sampling
-        self.shift_repeats = shift_repeats
-        self.expand_dna = expand_dna
-        self.cut_chromosome_ends = cut_chromosome_ends
-        self.val_split = val_split
-        self.rev_comp = rev_comp
-        self.dna_encoding = dna_encoding
-        self.sample_seed = sample_seed
-        self.chroms_to_exclude = chroms_to_exclude
-        self.chroms_to_include = chroms_to_include
-        self.min_max = min_max
 
-        self.scale = scale
-        self.normalize = normalize
-        self.sigma = sigma
+        # TODO: replace it with a single parameters dictionary:
+        self.run_params = {
+            "cool_path": cool_path,
+            "genome_path": genome_path,
+            "viewframe": viewframe,
+            "blacklist": blacklist,
+            "dna_fragment_length": dna_fragment_length,
+            "hic_fragment_length": hic_fragment_length,
+            "final_snip_size": final_snip_size,
+            "nan_threshold": nan_threshold,
+            "stochastic_sampling": stochastic_sampling,
+            "shift_repeats": shift_repeats,
+            "expand_dna": expand_dna,
+            "split_method": split_method,
+            "rev_comp": rev_comp,
+            "dna_encoding": dna_encoding,
+            "sample_seed": sample_seed,
+            "chroms_to_exclude": chroms_to_exclude, # TODO: re-implement
+            "chroms_to_include": chroms_to_include,
+            "min_max": min_max,
+            "scale": scale,
+            "norm_regime": norm_regime,
+            "sigma": sigma,
+        }
 
-        self.cooler = Cooler(hic_file)
-        self.make_dna(genome_file_or_dir, chroms_to_exclude, chroms_to_include)
-        self._x_train, self._x_val, self._y_train, self._y_val = self.split_data()
-        self.scale_y()
-        self.x_train, self.y_train  = DNALoader(self, self._x_train), HiCLoader(self, self._y_train)
-        self.x_val, self.y_val  = DNALoader(self, self._x_val), HiCLoader(self, self._y_val)
-        self.make_sample()
-        
-        self.params = {'hic_file': hic_file, 
-                        'genome_file_or_dir': genome_file_or_dir,
-                        'fragment_length': fragment_length,
-                       'chroms_to_exclude': self.chroms_to_exclude,
-                       'chroms_to_include': self.chroms_to_include,
-                       'sigma': sigma,
-                        'scale': scale,
-                        'normalize': normalize,
-                        'map_size': map_size,
-                        'nan_threshold': nan_threshold,
-                        'stochastic_sampling': stochastic_sampling,
-                        'shift_repeats': shift_repeats,
-                        'rev_comp': rev_comp,
-                        'expand_dna': expand_dna,
-                        'val_split': val_split,
-                        'cut_chromosome_ends': cut_chromosome_ends,
-                        'sample_seed': sample_seed}
+        # Pre-load cooler (no dump of snippets into RAM here):
+        self._cooler = Cooler(cool_path)
+        self._binsize = self._cooler.binsize
 
-    def make_dna(self, genome_file_or_dir, exclude, include):
-        '''Makes a dict of chromosomes' sequences'''
-        self.DNA = dict()
-        self.names = []
-        if os.path.isdir(genome_file_or_dir):
-            files_in_dir = os.listdir(genome_file_or_dir)
-            if include != []:
-                availible_files = [i for i in files_in_dir if (i.split('.')[0] in include and i.split('.')[0] in self.cooler.chromnames)]
-            elif exclude != []:
-                availible_files = [i for i in files_in_dir if (i.split('.')[0] not in exclude and i.split('.')[0] in self.cooler.chromnames)]
-            else:
-                print("If it's possible you should select not all chromosomes for test&val samples")
-                availible_files = [i for i in files_in_dir if  i.split('.')[0] in self.cooler.chromnames]
-            
-            for file in availible_files:
-                fasta = next(SeqIO.parse(os.path.join(genome_file_or_dir, file), "fasta"))
-                self.DNA[fasta.name] = str(fasta.seq).lower()
-                self.names.append(fasta.name)
-                print(f'DNA data for {fasta.name} is loaded')
-                del fasta
+        # Make bin table and remove blacklisted regions
+        bin_table = self._cooler.bins()[:]
+        if blacklist is not None:
+            if isinstance(blacklist, str):
+                blacklist = bioframe.read_table(blacklist_path, schema="bed4", index_col=False)
+            try:
+                bin_table = bioframe.subtract(bin_table, blacklist)
+            except ValueError as e:
+                raise ValueError(
+                    "Blacklist table is incorrect, please, comply with the format. "
+                ) from e
+
+        # Read the viewframe (regions table):
+        if viewframe is None:
+            view_df = bioframe.make_viewframe([(chrom, 0, l, chrom) for chrom, l in self._cooler.chromsizes.items()])
+        elif isinstance(viewframe, str):
+            view_df = bioframe.read_table(viewframe, schema="bed4", index_col=False)
+            try:
+                view_df = bioframe.make_viewframe(view_df, check_bounds=self._cooler.chromsizes)
+            except ValueError as e:
+                raise ValueError(
+                    "View table is incorrect, please, comply with the format. "
+                ) from e
         else:
-            gen = SeqIO.parse(genome_file_or_dir, "fasta")
-            for fasta in gen:
-                name = fasta.name
-                if include != []:
-                    if name not in include or name not in self.cooler.chromnames:
-                        del fasta
-                        continue 
-                elif exclude != []:
-                    if name in exclude or name not in self.cooler.chromnames:
-                        del fasta
-                        continue
-                else:
-                    raise ValueError('You should select not all chromosomes for test&val samples')        
-                self.DNA[name] = str(fasta.seq).lower()
-                self.names.append(name)
-                print(f'DNA data for {fasta.name} is loaded')
-                del fasta
-        gc.collect()
-        print()
+            try:
+                view_df = bioframe.make_viewframe(viewframe, check_bounds=self._cooler.chromsizes)
+            except ValueError as e:
+                raise ValueError(
+                    "View table is incorrect, please, comply with the format. "
+                ) from e
+        self._viewframe = view_df
 
-    def transform_hic(self, hic_matrix_raw, hic_matrix):
-        '''Transformations on Hi-C maps'''
-        transformed_arr = adaptive_coarsegrain(hic_matrix_raw, hic_matrix)
-        nan_mask = np.isnan(transformed_arr)
-        transformed_arr, _,_,_ = observed_over_expected(transformed_arr, mask = ~nan_mask)
-        transformed_arr = np.log(transformed_arr)
-        transformed_arr = interp_nan(transformed_arr)
-        return transformed_arr, np.mean(nan_mask)
+        # Retain only bins provided in a viewframe:
+        selection = bioframe.overlap(bin_table, self._viewframe, how='right', return_input=False).index
+        bin_table = bin_table.loc[selection, :]
+        self._bin_table = bin_table
 
-    def get_region(self, name, start, end):
-        '''Get Hi-C map by position'''
-        mtx_raw = self.balanced.fetch(f'{name}:{start}-{end}')
-        mtx_balanced = self.not_balanced.fetch(f'{name}:{start}-{end}')
-        return self.transform_hic(mtx_raw, mtx_balanced)
 
-    def split_data(self):
-        '''Split genome and Hi-C data into fragments and distribute them between train and validation samples'''
-        resolution = self.cooler.binsize
-        brim_len = 0 if not self.expand_dna else self.mapped_len // 2
-        self.dna_len = self.mapped_len + brim_len * 2
-        initial_map_size = self.mapped_len // resolution
-        zoom_rate = self.map_size / initial_map_size
-        self.zoom_rate = zoom_rate
-        fragment_length_str = f'{brim_len} + {self.mapped_len} + {brim_len}' if brim_len else str(self.mapped_len)
-        if self.zoom_rate != 1:
-            print(f'Maps are zoomed {zoom_rate} times')
-        print(f'For {self.map_size}x{self.map_size} map used {fragment_length_str} nucleotide fragments')
+        # Create genomic windows of hic_fragment_length size and annotate them by viewframe:
+        hic_window_table = cooltools.snipping.make_bin_aligned_windows(
+            self._cooler.binsize,
+            self._bin_table['chrom'],
+            self._bin_table['start'],
+            flank_bp=hic_fragment_length//2)
+        self._hic_window_table = bioframe.overlap(hic_window_table, view_df, how='inner').rename({'name_': 'region'}, axis=1).drop(['chrom_', 'start_', 'end_'], axis=1)
 
-        use_big_map = self.stochastic_sampling or (self.shift_repeats > 1)
-        self.slice_mapped_len = self.mapped_len if not use_big_map else self.mapped_len * 2
-        real_map_size = self.map_size if not use_big_map else self.map_size * 2
-        if use_big_map:
-            print(f'Initial dataset contains {real_map_size}x{real_map_size} maps, overlaping in {self.map_size} pixels')
-            print(f'{self.map_size}x{self.map_size} maps for training will be sampled from them, maps for testing are their top left fragments')
 
-        self.balanced, self.not_balanced = self.cooler.matrix(balance=True), self.cooler.matrix(balance=False)
-        hic_list = []
-        dna_list = []
-        for n_, name in enumerate(self.names):
-            chrom_len = self.cooler.chromsizes[name]
-            assert chrom_len == len(self.DNA[name])
-            start_pos = max(self.cut_chromosome_ends, brim_len)
-            end_pos = chrom_len - start_pos - self.slice_mapped_len
-            for start in range(start_pos, end_pos, self.mapped_len):
-                new_block, nan_percentage = self.get_region(name, start, start + self.slice_mapped_len)
-                #new_block2, nan_mask2 = get_region(balanced, not_balanced, name, start, start + fragment_size)
-                if nan_percentage > self.nan_threshold:
-                    continue
-                #new_block = np.stack((new_block, new_block2), axis=-1)
-                new_block = np.nan_to_num(new_block, nan = -1.0, posinf = 1.0, neginf = -1.0)
-                assert np.any(~np.isinf(new_block))
-                if zoom_rate != 1:
-                    new_block = zoom(new_block, (zoom_rate, zoom_rate))[:real_map_size, :real_map_size, None]
-                else:
-                    new_block = new_block[:real_map_size, :real_map_size, None]
-                if self.sigma:
-                    new_block = gaussian_filter(new_block, sigma = self.sigma)
+        # Read FASTA sequences into dictionary:
+        self._dna, self._names = load_fasta(genome_path, self._cooler, [], []) # TODO: remove extra args
+        # Create genomic windows of dna_fragment_length size and select only the ones accepted for Hi-C:
+        dna_window_table = cooltools.snipping.make_bin_aligned_windows(
+            self._cooler.binsize,
+            self._bin_table['chrom'],
+            self._bin_table['start'],
+            flank_bp=dna_fragment_length//2)
+        self._dna_window_table = dna_window_table.loc[self._hic_window_table.index, :]
 
-                hic_list.append(new_block)
-                dna_list.append(np.array([n_, start - brim_len, start + self.slice_mapped_len + brim_len]))
-                del new_block
-            print(f'Hi-C data for {name} is loaded')
+        # Retain only selected bins in bin_table:
+        self._bin_table = self._bin_table.loc[self._hic_window_table.index, :]
 
-        data  = self.train_val_split(np.array(dna_list), np.array(hic_list))
-        if self.shift_repeats > 1:
-            _x_train, _x_val, _y_train, _y_val = data
-            x_train, x_val, y_train, y_val = [], [], [], []
-            shift = self.mapped_len // self.shift_repeats
-            y_shift = int(shift / self.mapped_len * self.map_size)
-            for i in range(self.shift_repeats):
-                x_shift_array = np.concatenate((np.zeros((1, 1), dtype=int), np.full((2, 1), shift * i))).T
-                y_shift_start, y_shift_end = y_shift * i, y_shift * i + self.map_size
-                y_train.append(_y_train[:, y_shift_start:y_shift_end, y_shift_start:y_shift_end])
-                x_train.append(_x_train + x_shift_array)
-                y_val.append(_y_val[:, y_shift_start:y_shift_end, y_shift_start:y_shift_end])
-                x_val.append(_x_val + x_shift_array)
-            del data
-            data = np.concatenate(x_train), np.concatenate(x_val), np.concatenate(y_train), np.concatenate(y_val)
-            del _x_train, _x_val, _y_train, _y_val, x_train, x_val, y_train, y_val
 
-        del dna_list, hic_list
-        gc.collect()
-        
-        return data
-
-    def train_val_split(self, dna_list, hic_list):
-        assert len(dna_list) == len(hic_list)
-        if self.val_split == 'test':
-            return dna_list, dna_list, hic_list, hic_list
-        method, val_split = self.val_split
-        if method.startswith('chr'):
-            if val_split < 1:
-                val_split = int(len(hic_list) * val_split)
-            val_split += 2 # because then two elenents will be thrown out
-
-            chrom, pos = method.split()
-            chrom_inds = np.where(dna_list[:, 0] == self.names.index(chrom))
-            ind_in_chrom = np.where(np.all(((dna_list[chrom_inds][:, 1] < pos), (dna_list[chrom_inds][:, 2] >= pos)), axis = 0))
-            mid = chrom_inds[0][0] + ind_in_chrom[0][0]
-            x_val = [dna_list.pop(mid - val_split // 2) for i in range(val_split)]
-            y_val = [hic_list.pop(mid - val_split // 2) for i in range(val_split)]
-            # cut edge elements to avoid intersection with train dataset
-            data = dna_list, x_val[1:-1], hic_list, y_val[1:-1]
-            del hic_list
-            return data
+        initial_snip_size = hic_fragment_length // self._binsize
+        if final_snip_size:
+            zoom_rate = final_snip_size / initial_snip_size
+            self._zoom_rate = zoom_rate
         else:
-
-            if method == 'random':
-                if val_split > 1:
-                    val_split /= len(hic_list)
-
-                data = train_test_split(dna_list, hic_list, val_size = val_split, random_state = 0)
-                del hic_list
-                return data
-
-            else:
-                if val_split < 1:
-                    val_split = int(len(hic_list) * val_split)
-                val_split += 2 # because then two elenents will be thrown out
-                if method == 'first':
-                    data = dna_list[val_split:], dna_list[:val_split], hic_list[val_split:], hic_list[:val_split]
-                elif method == 'last':
-                    data = dna_list[:-val_split], dna_list[-val_split:], hic_list[:-val_split], hic_list[-val_split:]
-                del hic_list
-                # cut edge elements to avoid intersection with train dataset or cut a chromosome end
-                return data[0], data[1][1:-1], data[2], data[3][1:-1]
+            self._zoom_rate = 1
+        print(f'For each sample: select {initial_snip_size}x{initial_snip_size} snippets, zoomify to {final_snip_size}x{final_snip_size} (Ys) and align with {dna_fragment_length} nucleotides (Xs)')
 
 
-    def scale_y(self):
-        '''Scale Hi-C maps to some interval'''
-        if self.scale is None:
-            return
-        else:
-            if self.normalize == 'global':
-                if self.min_max == (None, None):
-                    total_min = min(self._y_train.min(), self._y_val.min())
-                else:
-                    total_min = self.min_max[0]
-                self._y_train -= total_min
-                self._y_val -= total_min
+        # Load Hi-C dataset:
+        custom_transform = functools.partial(chimaera_transform,
+                min_frac_valid_pixels=nan_threshold,
+                remove_diag=2,
+                fill_diag=0,
+                fill_missing=0,
+                sigma=sigma)
+        self._snipper = TransformingSnipper(self._cooler,
+                                       view_df=self._viewframe,
+                                       transform=custom_transform,
+                                       padding=2)
+        with Pool(nthreads_snipper) as pool:
+            stack = cooltools.snipping.pileup(
+                self._hic_window_table,
+                self._snipper.select,
+                self._snipper.snip,
+                map=pool.map)
 
-                
-                if self.min_max == (None, None):
-                    total_max = max(self._y_train.max(), self._y_val.max())
-                else:
-                    total_max = self.min_max[1]
-                
-                self._y_train /= total_max
-                self._y_val /= total_max
+        ys = stack.T
+        # Resize:
+        if final_snip_size is not None or final_snip_size != snippet.shape[0]:
+            ys = np.array([zoom_array(snip, (final_snip_size, final_snip_size), same_sum=True) for snip in ys])
 
-                self.min_max = (total_min, total_max)
+        # Remove non-readable regions:
+        whitelist = np.isfinite(ys.sum(axis=1).sum(axis=1))
+        ys = ys[whitelist]
+        print(f"Only {sum(whitelist)} regions are readable out of {len(self._bin_table)} initial") # TODO: replace with logging.info for debug level control
+        self._bin_table = self._bin_table.loc[whitelist, :]
+        self._hic_window_table = self._hic_window_table.loc[whitelist, :]
+        self._dna_window_table = self._dna_window_table.loc[whitelist, :]
 
-            elif self.normalize == 'each':
-                self._y_train -= np.min(self._y_train, axis=(1,2,3)).reshape(-1,1,1,1)
-                self._y_train /= np.max(self._y_train, axis=(1,2,3)).reshape(-1,1,1,1)
-                self._y_val -= np.min(self._y_val, axis=(1,2,3)).reshape(-1,1,1,1)
-                self._y_val /= np.max(self._y_val, axis=(1,2,3)).reshape(-1,1,1,1)
-            else:
-                raise ValueError("normalize arguement should be 'global' or 'each'")
+        # Rescale ys:
+        ys = rescale_ys(ys, scale=scale, norm_regime=norm_regime, min_max=min_max)
+        self._hic = ys
 
-            if self.scale != (0, 1):
-                self._y_train *= self.scale[1] - self.scale[0]
-                self._y_train += self.scale[0]
-                self._y_val *= self.scale[1] - self.scale[0]
-                self._y_val += self.scale[0]
-        
-        gc.collect()
+        # Split train and test, generates indexes of the bin table that will be included into train/test,
+        # Note that this procedure guarantees that no overlapping genomic windows are in train and test simultaneously:
+        # TODO: introduce random_state?
+        self._idx_x_train, self._idx_x_val, self._idx_y_train, self._idx_y_val = split_data(self._bin_table,
+                                                                            method=split_method[0],
+                                                                            params={'val_split': split_method[1]})
+        self._idx_x_train_sample, self._idx_x_val_sample, self._idx_y_train_sample, self._idx_y_val_sample = \
+            cast_samples(self._idx_x_train, self._idx_x_val, self._idx_y_train, self._idx_y_val, nsamples=9, seed=None)
 
-    def make_sample(self, seed=None):
-        '''Make a small subsample of the validation sample for visulization'''
-        if len(self.y_val)<9:
-            return
-        if seed is None:
-            np.random.seed(self.sample_seed)
-        elif seed == 'random':
-            pass
-        else:
-            np.random.seed(seed)
-        train_inds = np.random.choice(len(self.y_train), 9, replace = False)
-        val_inds = np.random.choice(len(self.y_val), 9, replace = False)
-        self.x_train_sample, self.y_train_sample = self.x_train[train_inds], self.y_train[train_inds]
-        self.x_val_sample, self.y_val_sample = self.x_val[val_inds], self.y_val[val_inds]
+        print(f"Full dataset: {len(self._bin_table)}, train size: {len(self._idx_x_train)}, validation size: {len(self._idx_x_val)} samples")
 
+        # Load train and test:
+        self.x_train = DNALoader(self._idx_x_train, self._dna_window_table, self._dna)
+        self.x_val   = DNALoader(self._idx_x_val,   self._dna_window_table, self._dna)
+        self.y_train = HiCLoader(self._idx_y_train, self._hic)
+        self.y_val   = HiCLoader(self._idx_y_val,   self._hic)
 
+        self.x_train_sample = DNALoader(self._idx_x_train_sample, self._dna_window_table, self._dna)
+        self.x_val_sample   = DNALoader(self._idx_x_val_sample,   self._dna_window_table, self._dna)
+        self.y_train_sample = HiCLoader(self._idx_y_train_sample, self._hic)
+        self.y_val_sample   = HiCLoader(self._idx_y_val_sample,   self._hic)
 
 
 class DNALoader():
-
     """Saves memory and helps to make array of one-hot-encoded DNA batch
     only when it is needed. Input data of model is stored in DNA string 
     and array of indices"""
 
-    def __init__(self, data, input_data):
-        self.DNA = data.DNA
-        self.names = data.names
-        self.dna_len = data.dna_len
-        self.input_data = input_data
+    def __init__(self, idx_xs, dna_table, dna, force_lower=True, alphabet={'a' : 0, 'c' : 1, 'g' : 2, 't' : 3, 'n' : 4}):
+        self.input_data = idx_xs
+        self.dna_table = dna_table
+        self.dna = dna
         self.len = len(self.input_data)
-        self.alphabet = {'a' : 0, 'c' : 1, 'g' : 2, 't' : 3, 'n' : 4}
-        # if isinstance(self.input_data, np.ndarray):
+        self.forced_lower = force_lower
+        self.alphabet = alphabet
 
-    def one_hot(self, seq):
-        return to_categorical([self.alphabet[i] for i in list(seq)])[:,:4]
-        
     def __getitem__(self, i):
-        if isinstance(i, tuple):
+        if isinstance(i, tuple): # TODO: remove?
             if len(i) == 2 and isinstance(i[1], int):
                 i, shift = i
         else:
@@ -386,13 +289,17 @@ class DNALoader():
             iterator = [i]
         else:
             iterator = i
+
         batch = []
-        for j in iterator:
-            chrom, start, _ = self.input_data[j]
+        for query in iterator:
+            chrom, start, end = self.dna_table.loc[self.idx_xs[query], ['chrom', 'start', 'end']]
             start += shift
-            end = start + self.dna_len
-            seq = self.DNA[self.names[chrom]][start : end]
-            batch.append(self.one_hot(seq))
+            end += shift
+            seq = self.dna[chrom][start : end]
+            if self.forced_lower:
+                seq = seq.lower()
+            seq_encoded = one_hot(seq, self.alphabet)
+            batch.append(seq_encoded)
         return np.array(batch)
 
     def __len__(self):
@@ -400,20 +307,20 @@ class DNALoader():
 
 
 class HiCLoader():
-    def __init__(self, data, input_data):
-        self.map_size = data.map_size
-        self.input_data = input_data
-        self.len = len(self.input_data)
-    
+    def __init__(self, idx_ys, hic):
+        self.idx_ys = idx_ys
+        self.len = len(self.idx_ys)
+        self.ys = hic
+
     def show(self, i):
         plot_map(self[i])
 
     def __getitem__(self, i):
-        if isinstance(i, tuple):
-            if len(i) == 2 and isinstance(i[1], int):
-                i, shift = i
-        else:
-            shift = 0
+        # if isinstance(i, tuple): # TODO: remove?
+        #     if len(i) == 2 and isinstance(i[1], int):
+        #         i, shift = i
+        # else:
+        #     shift = 0
         if isinstance(i, slice):
             start = i.start if i.start else 0
             start = start if start >= 0 else self.len - start
@@ -425,13 +332,11 @@ class HiCLoader():
             ind = [i]
         else:
             ind = i
-        batch = self.input_data[ind]
-        batch = batch[:, shift : shift + self.map_size, shift : shift + self.map_size]
+        batch = self.ys[ind]
         return np.array(batch)
 
     def __len__(self):
         return self.len
-
 
 
 class DataGenerator(Sequence):
@@ -445,7 +350,7 @@ class DataGenerator(Sequence):
                 self.y = data.y_latent_train
         else:
             self.X = data.x_val
-            if data.stochastic_sampling or data.val_split == 'test':
+            if data.stochastic_sampling or data.split_method == 'test':
                 self.y = data.y_val                
             else:
                 self.y = data.y_latent_val
