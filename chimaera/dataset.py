@@ -55,11 +55,8 @@ with chromosomes' files;
         _bin_table - table of genomic bines used for samples creatin. Each bin is a window center for the region.
         _viewframe - genomic regions (chromosomes or chromosomal arms)
         _DNA
-        _min_max
         _names
         _snipper - snipper that loads the snips
-        _mapped_len - size of DNA for one sample
-        _dna_len - real size of DNA for one sample
         _binsize - resolution of Hi-C maps provided with cooler
         _zoom_rate - zoom rate for making Hi-C maps fitting the required window size
         _idx_x_train, _idx_x_val, _idx_y_train,_idx_y_val - indexes of samples in the bin table
@@ -234,7 +231,7 @@ with chromosomes' files;
 
         # Rescale ys:
         ys = rescale_ys(ys, scale=scale, norm_regime=norm_regime, min_max=min_max)
-        self._hic = ys
+        self._hic, min_max = ys # TODO: Should we store min_max?
 
         # Split train and test, generates indexes of the bin table that will be included into train/test,
         # Note that this procedure guarantees that no overlapping genomic windows are in train and test simultaneously:
@@ -292,7 +289,7 @@ class DNALoader():
 
         batch = []
         for query in iterator:
-            chrom, start, end = self.dna_table.loc[self.idx_xs[query], ['chrom', 'start', 'end']]
+            chrom, start, end = self.dna_table.loc[self.input_data[query], ['chrom', 'start', 'end']]
             start += shift
             end += shift
             seq = self.dna[chrom][start : end]
@@ -332,7 +329,7 @@ class HiCLoader():
             ind = [i]
         else:
             ind = i
-        batch = self.ys[ind]
+        batch = self.ys[self.idx_ys[ind]]
         return np.array(batch)
 
     def __len__(self):
@@ -374,8 +371,8 @@ class DataGenerator(Sequence):
             y = self.y[indexes]
         else:
             if self.train:
-                shift = np.random.choice(self.data.mapped_len)
-                y_shift = int(shift / self.data.mapped_len * self.data.map_size)
+                shift = np.random.choice(self.data.run_params['hic_fragment_length'])
+                y_shift = int(shift / self.data.run_params['dna_fragment_length'] * self.data.run_params['hic_fragment_length'])
                 X = self.X[indexes, shift]
                 y = self.y[indexes, y_shift]
                 if self.data.rev_comp:
