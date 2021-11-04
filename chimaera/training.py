@@ -8,6 +8,7 @@ import json
 import gc
 from .dataset import *
 from .plot import *
+import warnings
 
 class ModelMaster():
     """Contains model and functions to work with it"""
@@ -20,26 +21,31 @@ class ModelMaster():
                  rewrite = False,
                  predict_as_training = False):
 
-        super(ModelMaster, self).__init__()
+        #super(ModelMaster, self).__init__()
 
         self.data = data
         if data is None or isinstance(data, str):
             if data is None:
+                assert os.path.isdir(model_dir), f"Provide a model directory, not {model_dir}"
                 data_params_path = os.path.join(model_dir, "data_params.json")
+                assert os.path.isfile(data_params_path), f"Directory {model_dir} does not have data_params.json"
             else:
+                assert os.path.isfile(data_params_path), "f{data_params_path} is not a file"
                 data_params_path = data
             with open(data_params_path, "r") as read_file:
                 data_params = json.load(read_file)
             if genome_file_or_dir is None or hic_file is None:
-                raise ValueError('Indicate pathes to genome and Hi-C maps files')
+                raise ValueError('Indicate paths for genome and Hi-C maps files')
             data_params['hic_file'] = hic_file
             data_params['genome_file_or_dir'] = genome_file_or_dir
             self.data = DataMaster(**data_params)
+        else:
+            warnings.warn("Both model object and model file provided. Ignoring the file...")
         self.x_train = self.data.x_train
         self.y_train = self.data.y_train
         self.x_val = self.data.x_val
         self.y_val = self.data.y_val
-        self.input_len = self.data.dna_len
+        self.input_len = self.data.run_params['dna_fragment_length']
         self.saving_dir = saving_dir
         self.predict_as_training = predict_as_training
         self.test_data = None
@@ -74,9 +80,9 @@ class ModelMaster():
             self.val_generator = DataGenerator(data=self.data, batch_size=self.batch_size, train=False, encoder=self.enc)
             
     def build(self, neural_net):
-        neural_net.update(input_len = self.data.dna_len,
-                          map_size = self.data.map_size,
-                          output_scale = self.data.scale)
+        neural_net.update(input_len = self.data.run_params['dna_fragment_length'],
+                          map_size = self.data.run_params['hic_fragment_length'],
+                          output_scale = self.data.run_params.get('scale', (0, 1)))
         self.build_enc(neural_net.enc)
         self.build_dec(neural_net.dec)
         self.build_model(neural_net.model)
@@ -141,7 +147,7 @@ class ModelMaster():
             print("Model won't be saved while training")
             return
         with open(os.path.join(self.saving_dir, 'data_params.json'), 'w') as file:
-            params = self.data.params.copy()
+            params = self.data.run_params.copy()
             del params['hic_file']
             del params['genome_file_or_dir']
             file.write(json.dumps(params))
@@ -272,24 +278,24 @@ class ModelMaster():
         if include_train:
             train_generator = DataGenerator(data=self.data, batch_size=self.batch_size, train=True, shuffle=False)
             y_pred_train = self.predict(train_generator, prediction=prediction)
-            r_train = metric(y_pred_train, self.data._y_train)
-            r_train_negative_control = metric(y_pred_train, np.random.permutation(self.data._y_train))
+            r_train = metric(y_pred_train, self.data.y_train)
+            r_train_negative_control = metric(y_pred_train, np.random.permutation(self.data.y_train))
         else:
             r_train = r_train_negative_control = None
         val_generator = DataGenerator(data=self.data, batch_size=self.batch_size, train=False, shuffle=False)    
         y_pred_val = self.predict(val_generator, prediction=prediction)
-        r_val = metric(y_pred_val, self.data._y_val)
+        r_val = metric(y_pred_val, self.data.y_val)
         gc.collect()
 
-        r_val_negative_control = metric(y_pred_val, np.random.permutation(self.data._y_val))
+        r_val_negative_control = metric(y_pred_val, np.random.permutation(self.data.y_val))
         gc.collect()
         r_test = r_test_negative_control = test_chroms = None
         if self.test_data is not None:
             test_generator = DataGenerator(data=self.test_data, batch_size=self.batch_size, train=False, shuffle=False)       
             y_pred_test = self.predict(test_generator, prediction=prediction) 
-            r_test = metric(y_pred_test, self.test_data._y_val)
-            r_test_negative_control = metric(y_pred_test, np.random.permutation(self.test_data._y_val))
-            test_chroms = self.test_data.names
+            r_test = metric(y_pred_test, self.test_data.y_val)
+            r_test_negative_control = metric(y_pred_test, np.random.permutation(self.test_data.y_val))
+            test_chroms = self.test_data._names
             gc.collect()
         plot_score(metric_name,
                    r_train,
@@ -298,7 +304,7 @@ class ModelMaster():
                    r_val_negative_control,
                    r_test,
                    r_test_negative_control,
-                   self.data.names,
+                   self.data._names,
                    test_chroms,
                    **kwargs)
 
@@ -386,15 +392,15 @@ class ModelMaster():
         plot_filters(filters, figsize = figsize, cmap = cmap, normalize=normalize)
     
     def load_test_chromosome(self, chrom, cut_chromosome_ends=None):
-        params = self.data.params
+        params = self.data.run_params
         if isinstance(chrom, str):
             chrom = [chrom]
-        exclude = list(set(self.data.names + self.data.chroms_to_exclude))
+        exclude = list(set(self.data._names + self.data.run_params['chroms_to_exclude']))
         for i in chrom:
             exclude.remove(i)
         params['chroms_to_exclude'] = exclude
         params['val_split'] = 'test'
-        params['min_max'] = self.data.min_max
+        params['min_max'] = self.data.run_params.get('min_max')
         if cut_chromosome_ends is not None:
             params['cut_chromosome_ends'] = cut_chromosome_ends
         self.test_data = DataMaster(**params)
@@ -405,11 +411,11 @@ class ModelMaster():
     def graphic_analisis(self, num, n_layers=3, theme='dark', color_shifts={'heatmap': 50, 'filters': 200},  aggregation='max', return_filters=False):
         first_layers = tf.keras.models.Sequential(self.model.layers[:n_layers])
         pred = first_layers.predict(self.data.x_val[num])[0].T
-        ind, start, _ = self.data._x_val[num]
-        start, end = start, start + self.data.dna_len
-        if self.data.expand_dna:
+        ind, start, _ = self.data.x_val[num]
+        start, end = start, start + self.data._dna_len
+        if self.data.run_params['expand_dna']:
             pred = pred[:, pred.shape[1] // 4 : -pred.shape[1] // 4]
-            brim = self.data.dna_len // 4
+            brim = self.data._dna_len // 4
             start, end = start + brim, end - brim
 
         aggregation_rate =  pred.shape[1] // 512
