@@ -104,7 +104,6 @@ graphic monitoring, doesn't affect anyting important
         self.scale_y()
         self.x_train, self.y_train  = DNALoader(self, self._x_train), HiCLoader(self, self._y_train)
         self.x_val, self.y_val  = DNALoader(self, self._x_val), HiCLoader(self, self._y_val)
-        self.make_sample()
         
         self.params = {'hic_file': hic_file, 
                         'genome_file_or_dir': genome_file_or_dir,
@@ -436,7 +435,7 @@ class HiCLoader():
 
 class DataGenerator(Sequence):
     '''For loading into model'''
-    def __init__(self, data, train, batch_size = 4, shuffle = True, encoder = None):
+    def __init__(self, data, train, batch_size=4, shuffle=True, encoder=None, rev_comp=None):
         if train:
             self.X = data.x_train
             if data.stochastic_sampling:
@@ -453,6 +452,7 @@ class DataGenerator(Sequence):
         if data.stochastic_sampling and not encoder:
             raise ValueError('For training on dataset using stochastic sampling pass your encoder model to the encoder arguement')
         self.data = data
+        self.rev_comp = data.rev_comp if rev_comp is None else rev_comp
         self.batch_size = batch_size
         self.train = train
         self.shuffle = shuffle
@@ -473,7 +473,7 @@ class DataGenerator(Sequence):
                 y_shift = int(shift / self.data.mapped_len * self.data.map_size)
                 X = self.X[indexes, shift]
                 y = self.y[indexes, y_shift]
-                if self.data.rev_comp:
+                if self.rev_comp:
                     X, y = self.stochastic_rev_comp(X, y)
                 y = self.encoder.predict(y)
             else:
