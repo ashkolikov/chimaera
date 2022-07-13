@@ -1,6 +1,3 @@
-from dataclasses import dataclass
-#@title chimaera.train
-
 import os
 import tensorflow as tf
 import numpy as np
@@ -10,9 +7,9 @@ from scipy.stats import spearmanr
 from scipy.ndimage import gaussian_filter1d
 import json
 import gc
-#from .model import Chimaera
-#from .dataset import *
-#from .plot import *
+from .model import Chimaera
+from .dataset import *
+from .plot import *
 
 
 
