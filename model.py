@@ -1,7 +1,9 @@
-#@title chimaera.chimaera
-
+import os
+import numpy as np
+import matplotlib.pyplot as plt
 import tensorflow as tf
 import tensorflow.keras.backend as K
+from tensorflow.keras.utils import to_categorical, Sequence
 
 class Chimaera():
     def __init__(self, data, latent_dim=64, net_type='simple', model_dir=None):
