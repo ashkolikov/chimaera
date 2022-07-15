@@ -1,14 +1,13 @@
-#@title chimaera.mutations
-
 import numpy as np
 import matplotlib.pyplot as plt
+import seaborn as sns
+from tensorflow.keras.utils import to_categorical, Sequence
 from sklearn.preprocessing import OneHotEncoder
 from tqdm import tqdm
 from gimmemotifs.comparison import MotifComparer
 from gimmemotifs.motif import motif_from_align
 from gimmemotifs.motif import read_motifs
-clear_output()
-%matplotlib inline
+
 
 def plot_motiff_effect(x, correct, permuted, name='Motif', control='Control'):
     sample = [name] * np.prod(correct.shape) + [control] * np.prod(permuted.shape)
