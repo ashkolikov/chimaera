@@ -5,6 +5,9 @@ from sklearn.decomposition import PCA
 from skimage.measure import block_reduce
 from scipy.stats import spearmanr
 from scipy.ndimage import gaussian_filter1d
+from tensorflow.keras.utils import to_categorical, Sequence
+import matplotlib.pyplot as plt
+import seaborn as sns
 import json
 import gc
 from .model import Chimaera
@@ -17,7 +20,6 @@ class DataGenerator(Sequence):
     '''For loading into model while training - saves memory, shuffles batches, 
 allows making random sequences reverse complement.'''
     def __init__(self, x, y, batch_size=32, shuffle=True, rev_comp=False):
-        data = Model.data
         self.revcomp = rev_comp
         self.X = x
         self.y = y
