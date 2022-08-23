@@ -10,6 +10,7 @@ import gc
 from .model import CompositeModel, VAE, MainModel
 from .dataset import *
 from .plot import *
+from .mutations import *
 
 
 
@@ -17,7 +18,6 @@ class DataGenerator(Sequence):
     '''For loading into model while training - saves memory, shuffles batches, 
 allows making random sequences reverse complement.'''
     def __init__(self, x, y, batch_size=32, shuffle=True, rev_comp=False):
-        data = Model.data
         self.revcomp = rev_comp
         self.X = x
         self.y = y
@@ -165,8 +165,6 @@ class Chimaera():
                  predict_as_training = False,
                  neural_net = None):
 
-        super(Chimaera, self).__init__()
-
         self.data = data
         if data is None or isinstance(data, str):
             if data is None:
@@ -230,8 +228,8 @@ class Chimaera():
         if model is None:
             model = MainModel(self.data)
         inp = model.input
-        latent_output = main_model.output
-        self.attention_outputs = main_model.attention_outputs
+        latent_output = model.output
+        self.attention_outputs = model.attention_outputs
         self.latent_model = tf.keras.Model(inp, latent_output)
 
         final_output = self.dec(latent_output)
