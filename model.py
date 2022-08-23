@@ -55,7 +55,7 @@ class MainModel():
         x = tf.keras.layers.MaxPooling1D(pool_size=2)(x)
         x = tf.keras.layers.Dropout(self.dropout_rates[0])(x)
 
-        pooling_range = int(np.log2(data.dna_len)) - 8
+        pooling_range = int(np.log2(self.data.dna_len)) - 8
         for block in range(pooling_range-2):
             x = tf.keras.layers.Conv1D(self.filters[1],
                                        self.kernel_sizes[1],
@@ -145,7 +145,6 @@ class MainModel():
 
         output = x
         att_models = []
-        self.input = inp
         for att in atts:
             att_models.append(tf.keras.Model(self.inputinp, att))
 
@@ -248,6 +247,7 @@ class CompositeModel():
         
         custom_objects = {'SinePositionEncoding': keras_nlp.layers.SinePositionEncoding}
         self.model_1d = None
+        self.data = data
 
         if model_dir is not None:
             availible_files = os.listdir(model_dir)
