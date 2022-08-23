@@ -11,12 +11,13 @@ from itertools import product
 
 
 from cooler import Cooler
-from cooltools.lib.numutils import interp_nan, observed_over_expected, adaptive_coarsegrain
+from cooltools.lib.numutils import interp_nan#, observed_over_expected, adaptive_coarsegrain
 from Bio import SeqIO
+import bioframe
 
 from .plot import *
 
-class DataMaster(object):
+class Dataset(object):
     """Loads data for training
 
 hic_file: path to file with Hi-c maps;
@@ -76,12 +77,12 @@ h: higth of rotated map. 32 is preferable.
                  chroms_to_exclude = [],
                  chroms_to_include = [],
                  scale = None,
-                 normalize = 'minmax',
+                 normalize = 'standart',
                  min_max = (None, None),
                  nan_threshold = 0.2,
-                 rev_comp = False,
                  stochastic_sampling = False,
                  shift_repeats = 1,
+                 interpolator = None,
                  expand_dna = True,
                  psi = .001,
                  cross_threshold = 0.05,
@@ -99,7 +100,6 @@ h: higth of rotated map. 32 is preferable.
         self.shift_repeats = shift_repeats
         self.expand_dna = expand_dna
         self.val_split = val_split
-        self.rev_comp = rev_comp
         self.chroms_to_exclude = chroms_to_exclude
         self.chroms_to_include = chroms_to_include
         self.min_max = min_max
@@ -108,9 +108,10 @@ h: higth of rotated map. 32 is preferable.
         self.psi = psi
         self.sd = None
 
-        self.scale = scale
+        self.scale = scale if scale is not None else (0,1)
         self.normalize = normalize
         self.sigma = sigma
+        self.interpolator = interpolator
 
         self.mapped_len = fragment_length
         self.map_size = 128
@@ -124,7 +125,8 @@ h: higth of rotated map. 32 is preferable.
         self.organism = organism_name
         self.assembly = genome_file_or_dir.split('/')[-1].split('.')[0]
 
-        self.names, self.DNA = self.make_dna(genome_file_or_dir, chroms_to_exclude, chroms_to_include)
+        self.names = self.choose_chroms(self.cooler.chromnames, chroms_to_include, chroms_to_exclude)
+        self.DNA = self.make_dna(genome_file_or_dir, self.names)
         self.gc_content, self.trans_mtx = 0,0#self.calc_stats()
         if processed_hic is None:
             self.HIC = self.make_hic()
@@ -156,7 +158,7 @@ h: higth of rotated map. 32 is preferable.
         self.x_val, self.y_val  = DNALoader(self, self._x_val), HiCLoader(self, self._y_val)'''
         
 
-        self.params = {'hic_file': hic_file, 
+        self.params =  {'hic_file': hic_file, 
                         'genome_file_or_dir': genome_file_or_dir,
                         'fragment_length': fragment_length,
                         'chroms_to_exclude': self.chroms_to_exclude,
@@ -166,53 +168,61 @@ h: higth of rotated map. 32 is preferable.
                         'nan_threshold': nan_threshold,
                         'stochastic_sampling': stochastic_sampling,
                         'shift_repeats': shift_repeats,
-                        'rev_comp': rev_comp,
                         'h': h,
+                        'normalize': normalize,
                         'psi': psi,
                         'expand_dna': expand_dna,
                         'val_split': val_split,}
+    
+    def choose_chroms(self, available, include, exclude):
+        if include:
+            return [i for i in available if i in include]
+        if exclude:
+            return [i for i in available if i not in exclude]
+        else:
+            return available
 
-    def make_dna(self, genome_file_or_dir, exclude, include):
+    def make_dna(self, genome_file_or_dir, chroms):
         '''Makes a dict of chromosomes' sequences'''
         DNA = dict()
-        names = []
         if os.path.isdir(genome_file_or_dir):
-            files_in_dir = os.listdir(genome_file_or_dir)
-            if include != []:
-                availible_files = [i for i in files_in_dir if (i.split('.')[0] in include and i.split('.')[0] in self.cooler.chromnames)]
-            elif exclude != []:
-                availible_files = [i for i in files_in_dir if (i.split('.')[0] not in exclude and i.split('.')[0] in self.cooler.chromnames)]
-            else:
-                print("If it's possible you should select not all chromosomes for test&val samples")
-                availible_files = [i for i in files_in_dir if  i.split('.')[0] in self.cooler.chromnames]
-            
-            for file in availible_files:
-                fasta = next(SeqIO.parse(os.path.join(genome_file_or_dir, file), "fasta"))
-                DNA[fasta.name] = str(fasta.seq).lower()
-                names.append(fasta.name)
-                print(f'DNA data for {fasta.name} is loaded')
-                del fasta
+            available_files = os.listdir(genome_file_or_dir)
+            extension = available_files[0].split('.')[1]
+            for chrom in chroms:
+                file_name = chrom + '.' + extension
+                if file_name in available_files:
+                    if self.cooler.chromsizes[chrom] < self.dna_len * 4:
+                        print(f"Chromosome {chrom} is too short so it can't be used")
+                        self.names.remove(chrom)
+                    else:
+                        full_path = os.path.join(genome_file_or_dir, file_name)
+                        fasta = next(SeqIO.parse(full_path, "fasta"))
+                        DNA[chrom] = str(fasta.seq).lower()
+                        print(f'DNA data for {fasta.name} is loaded')
+                        del fasta
         else:
             gen = SeqIO.parse(genome_file_or_dir, "fasta")
+            n_found = 0
+            print('The order of chromosomes loading will be as in genome file but in sample the order will be as in .cool file')
             for fasta in gen:
-                name = fasta.name
-                if include != []:
-                    if name not in include or name not in self.cooler.chromnames:
-                        del fasta
-                        continue 
-                elif exclude != []:
-                    if name in exclude or name not in self.cooler.chromnames:
-                        del fasta
-                        continue
-                else:
-                    raise ValueError('You should select not all chromosomes for test&val samples')        
-                DNA[name] = str(fasta.seq).lower()
-                names.append(name)
-                print(f'DNA data for {fasta.name} is loaded')
+                chrom = fasta.name
+                if chrom in chroms:
+                    if self.cooler.chromsizes[chrom] < self.dna_len * 4:
+                        print(f"Chromosome {chrom} is too short so it can't be used")
+                        self.names.remove(chrom)
+                    n_found += 1
+                    DNA[chrom] = str(fasta.seq).lower()
+                    print(f'DNA data for {chrom} is loaded')
                 del fasta
+                if len(chroms) == n_found:
+                    break
+        for chrom in chroms:
+            if not (chrom in DNA.keys()):
+                self.names.remove(chrom)
+                print(f'No DNA found for {chrom}')
         gc.collect()
         print()
-        return names, DNA
+        return DNA
     
     def calc_stats(self):
         l = 0
@@ -256,9 +266,9 @@ h: higth of rotated map. 32 is preferable.
 
         '''
         square_map = zoom(square_map, 181 / len(square_map), order=1) # 181 ~ 128 * sqrt(2)
-        rotated_map = rotate(square_map, 45, order=1) 
-        cut_map = rotated_map[len(rotated_map) // 4 : len(rotated_map) // 2,
-                              len(rotated_map) // 4 : -len(rotated_map) // 4]
+        rotated_map = rotate(square_map, 45, order=1)                      
+        cut_map = rotated_map[len(rotated_map) // 2 - self.h : len(rotated_map) // 2,
+                                len(rotated_map) // 4 : -len(rotated_map) // 4]
         return cut_map
     
     def calculate_insulation_score(self):
@@ -288,13 +298,19 @@ along the main diagonal.'''
                 new_block += self.psi
 
                 result = np.log(new_block)
-                result = interp_nan(result)
-                result = self.rotate_and_cut(result)[-self.h:]
+                if self.interpolator is None:
+                    result = interp_nan(result)
+                    result = self.rotate_and_cut(result)[-self.h:]
+                else:
+                    result[cross] = -2
+                    result[:,cross] = -2
+                    result = zoom(result, 181 / len(result), order=1) # 181 ~ 128 * sqrt(2)
+                
 
                 # Tracing nan crosses after rotation and count their projections:
                 new_block[cross] = -5
                 new_block[:, cross] = -5
-                new_block = self.rotate_and_cut(new_block)[-self.h:]
+                new_block = self.rotate_and_cut(new_block)#[-self.h:]
                 
                 new_block = np.log(new_block)
                 block_quality = np.isnan(new_block).mean(axis=0)
@@ -306,6 +322,9 @@ along the main diagonal.'''
                 quality.append(block_quality)
             
             quality = np.hstack(quality)
+            if self.interpolator is not None:
+                chrom_hic = self.interpolator.predict(np.array(chrom_hic))[..., 0]
+                chrom_hic = [self.rotate_and_cut(i, a=False)[-self.h:] for i in chrom_hic]
             chrom_hic = np.hstack(chrom_hic)
             chrom_hic -= np.mean(chrom_hic, axis=1)[...,None]
             if self.sigma:
@@ -362,7 +381,6 @@ the Hi-C map. Doesn't do any operations with data itself.'''
             del hic_list
             return data
         else:
-
             if method == 'random':
                 if val_split > 1:
                     val_split /= len(hic_list)
@@ -438,7 +456,7 @@ nan_threshold) from samples.'''
                 good += 1
                 good_val.append(i)
         x_val, y_val = x_val[good_val], y_val[good_val]
-                    
+        clear_output()            
         print(f'{bad/(bad+good)*100:.2f}% of maps were excluded by NaN threshold')
         print(f'Train sample has {len(good_train)} pairs now (of \
 {expected_train_size} possible)')
@@ -448,7 +466,7 @@ nan_threshold) from samples.'''
 
     def scale_hic(self):
         '''Scale Hi-C maps' values to some interval'''
-        if self.normalize != 'standart' and self.scale is not None:
+        if self.normalize == 'minmax':
             chrom_mins = []
             if self.min_max == (None, None):
                 y_train = self.y_train[:]
@@ -462,8 +480,14 @@ nan_threshold) from samples.'''
                     i[1:] *= self.scale[1] - self.scale[0]
                     i[1:] += self.scale[0]
             gc.collect()
-        elif self.normalize == 'standart':
+        else:
+            self.q005 = 0
+            self.q995 = 1
             self.sd = self.y_train[:].std()
+            y = self.y_train[:]
+            q005 = np.quantile(y, 0.005)
+            q995 = np.quantile(y, 0.995)
+            self.q005, self.q995 = q005, q995
 
     def calculate_insulation_score(self, window=10):
         resolution = self.cooler.binsize
@@ -497,7 +521,17 @@ nan_threshold) from samples.'''
             arr[arr < -2] = -2
         return y_train_is[...,0], y_val_is[...,0]
 
-    
+    def load_bed(self, bed_file, bins, name):
+        bed = pd.read_csv(bed_file)
+
+        x_train = self._x_train.copy()
+        x_train[:, 0] = [self.names[i] for i in x_train[:, 0]]
+        x_train = pd.DataFrame(self._x_train)
+
+        x_val = self._x_val.copy()
+        x_val[:, 0] = [self.names[i] for i in x_val[:, 0]]
+        x_val = pd.DataFrame(self._x_val)
+        print(f'Data loaded into .{name}_train and .{name}_val attributes')
 
     def coord(self,
             x_chrom_start_end=None,
@@ -519,14 +553,14 @@ Use ONE arguement of possible:
         if x_chrom_start_end is not None:
             n, start, end = x_chrom_start_end
             chrom = self.names[n]
-            y_start = start // binsize
-            y_end = (end - 2 * self.offset) // binsize
+            y_start = (start + self.offset - self.mapped_len // 2) // binsize
+            y_end = (end - self.offset - self.mapped_len // 2) // binsize
             return chrom, y_start, y_end
         elif y_chrom_start_end is not None:
             n, start, end = y_chrom_start_end
             chrom = self.names[n]
-            x_start = start * binsize
-            x_end = end * binsize + 2 * self.offset
+            x_start = start * binsize + self.mapped_len // 2 - self.offset
+            x_end = end * binsize + self.offset + self.mapped_len // 2
             return chrom, x_start, x_end
         elif x_pos is not None:
             return (x_pos - self.offset) // binsize
@@ -545,6 +579,7 @@ Use ONE arguement of possible:
                         number,
                         ax=None,
                         y=None,
+                        name=None,
                         axis='both',
                         x_position='bottom',
                         show_position=True,
@@ -564,7 +599,6 @@ Use ONE arguement of possible:
                         vmax=None,
                         **kwargs):
         
-        plt.rcParams.update({'font.size': 9})
         if ax is None:
             _, ax = plt.subplots()
         
@@ -577,7 +611,7 @@ Use ONE arguement of possible:
         y = get_2d(y)
         im = ax.imshow(y,
                        extent=[0, y.shape[1], y.shape[0], 0],
-                       cmap=hic_cmap(),
+                       cmap="hic_cmap",
                        interpolation='none',
                        vmin=vmin,
                        vmax=vmax,
@@ -616,6 +650,9 @@ Use ONE arguement of possible:
             map_positions = ((genes - self.offset) / self.resolution).astype(int)
             cbottom = annotate_genes(ax, positions=genes, names=gene_names,
                                      constant=cbottom)
+        if name:
+            ax.set_ylabel(name)
+            
         if show:
             plt.show()
 
@@ -717,13 +754,18 @@ class HiCLoader():
             hic_map = self.HIC[self.names[chrom]][1:, start : end]
             batch.append(hic_map)
         batch = np.array(batch)[...,None]
-        if self.normalize == 'standart':
+        if self.normalize == 'standart' or self.normalize == 'both':
             mu = batch.mean(axis=(1,2,3))[:,None,None,None]
             sd = self.data.sd 
             if sd is not None:
                 batch = (batch - mu) / sd
             else: 
                 batch = batch - mu
+            if self.normalize == 'both':
+                batch = (batch - self.data.q005) / (self.data.q995 - self.data.q005)
+                if self.data.q005 != 0:
+                    batch[batch > 0.99] = 0.99
+                    batch[batch < 0.01] = 0.01
         return batch
 
     def __len__(self):
