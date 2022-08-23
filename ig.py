@@ -10,6 +10,11 @@ from scipy import interpolate
 from itertools import product
 import matplotlib.pyplot as plt
 import matplotlib
+import tensorflow as tf
+
+from .plot import *
+from .dataset import *
+from .train import *
 
 
 class IntegratedGradients():
