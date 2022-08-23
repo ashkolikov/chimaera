@@ -7,6 +7,10 @@ from tqdm import tqdm
 from gimmemotifs.comparison import MotifComparer
 from gimmemotifs.motif import motif_from_align
 from gimmemotifs.motif import read_motifs
+
+from .plot import *
+from .dataset import *
+from .train import *
  
 
 
