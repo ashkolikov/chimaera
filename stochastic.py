@@ -7,7 +7,11 @@ from tqdm import tqdm
 from gimmemotifs.comparison import MotifComparer
 from gimmemotifs.motif import motif_from_align
 from gimmemotifs.motif import read_motifs
+from IPython.display import clear_output
 
+from .plot import *
+from .dataset import *
+from .train import *
 from .mutations import *
 
 
@@ -349,7 +353,7 @@ class Evolution():
             ys = self.Model.predict(MutSeqGen(x, substitutions,
                                               [self.Model.data.dna_len//2]*len(substitutions),
                                               anchor='center',
-                                              batch_size=Model.batch_size))
+                                              batch_size=self.Model.batch_size))
             new_population = self.reproduce(ys, y_wt)
             np.random.shuffle(new_population)
             new_population = self.recombination(new_population)
@@ -384,7 +388,7 @@ class Evolution():
                                          [substitution],
                                          [self.Model.data.dna_len//2],
                                          anchor='center',
-                                         batch_size=Model.batch_size))
+                                         batch_size=self.Model.batch_size))
         plot_map(y_wt, name='WT')
         plot_map(y, name='With found motif')
         
