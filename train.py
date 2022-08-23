@@ -5,12 +5,9 @@ from sklearn.decomposition import PCA
 from skimage.measure import block_reduce
 from scipy.stats import spearmanr
 from scipy.ndimage import gaussian_filter1d
-from tensorflow.keras.utils import to_categorical, Sequence
-import matplotlib.pyplot as plt
-import seaborn as sns
 import json
 import gc
-from .model import Chimaera
+from .model import CompositeModel, VAE, MainModel
 from .dataset import *
 from .plot import *
 
@@ -20,6 +17,7 @@ class DataGenerator(Sequence):
     '''For loading into model while training - saves memory, shuffles batches, 
 allows making random sequences reverse complement.'''
     def __init__(self, x, y, batch_size=32, shuffle=True, rev_comp=False):
+        data = Model.data
         self.revcomp = rev_comp
         self.X = x
         self.y = y
@@ -83,13 +81,13 @@ allows flipping random maps.'''
         a[ind] = np.flip(a[ind], axis=1)
         return a
 
-class AEMaster():
-    def __init__(self, data, nn):
+class AETrainer():
+    def __init__(self, model, data=None):
 
-        self.ae = nn.ae
-        self.encoder = nn.encoder
-        self.decoder = nn.decoder
-        self.data = data
+        self.ae = model.ae
+        self.encoder = model.encoder
+        self.decoder = model.decoder
+        self.data = model.data if data is None else data
     
     def train(self, epochs, batch_size=64, use_test=True, rotate=False, shuffle=True):
         if self.ae is None:
@@ -107,7 +105,7 @@ class AEMaster():
         self._spheares(point, cloud)
     
     def _spheares(self, point, cloud):
-        rs = [0.3, 0.5, 0.8, 1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 2, 2.5, 3, 4, 5, 10]
+        rs = [0.5, 1, 2, 3, 4, 5, 7.5, 10, 15, 20, 30]
         _, axs = plt.subplots(2,len(rs),figsize=(25,10))
         for i, r in enumerate(rs):
             np.random.seed(1)
@@ -129,7 +127,7 @@ class AEMaster():
                 plt.setp(axs[0,i].get_yticklabels(), visible=False)
             axs[0,i].set_title(str(r))
             ind = np.random.randint(64)
-            axs[1,i].imshow(pred_cloud[ind][:,:,0].T, cmap=hic_cmap())
+            axs[1,i].imshow(pred_cloud[ind][:,:,0].T, cmap="hic_cmap")
             axs[1,i].axis('off')
         plt.show()
 
@@ -148,10 +146,13 @@ class AEMaster():
                      data=self.data, equal_scale=equal_scale)
     
     def score(self):
-        pass
+        y = self.data.y_val[:]
+        datagen = HiCDataGenerator(y, rotate=False)
+        y_pred = self.ae.predict(datagen)
+        return np.corrcoeff(y.flat, y_pred.flat)[0,1]
 
 
-class ModelMaster():
+class Chimaera():
     """Contains model and functions to work with it"""
     def __init__(self, 
                  data = None,
@@ -164,7 +165,7 @@ class ModelMaster():
                  predict_as_training = False,
                  neural_net = None):
 
-        super(ModelMaster, self).__init__()
+        super(Chimaera, self).__init__()
 
         self.data = data
         if data is None or isinstance(data, str):
@@ -178,7 +179,7 @@ class ModelMaster():
                 raise ValueError('Indicate pathes to genome and Hi-C maps files')
             data_params['hic_file'] = hic_file
             data_params['genome_file_or_dir'] = genome_file_or_dir
-            self.data = DataMaster(**data_params)
+            self.data = Dataset(**data_params)
         self.x_train = self.data.x_train
         self.y_train = self.data.y_train
         self.x_val = self.data.x_val
@@ -210,7 +211,7 @@ class ModelMaster():
             else:
                 self.build(neural_net)
         else:
-            neural_net = Chimaera(data, model_dir=model_dir)
+            neural_net = CompositeModel(data=data, model_dir=model_dir)
             self.build(neural_net)
             
     def build(self, neural_net):
@@ -218,41 +219,34 @@ class ModelMaster():
         self.dec = neural_net.decoder
         self.model = neural_net.model
         self.model_1d = neural_net.model_1d
-        #self.build_model(neural_net.model)
+        for k,v in self.dec._get_trainable_state().items():
+            k.trainable = False
         self.ae = neural_net.ae
         self.batch_size = max(1, 2**29//np.prod(self.model.layers[1].output_shape[1:]))
         self.encode_y()
         self.encoded = True
+    
+    def rebuild(self, model=None):
+        if model is None:
+            model = MainModel(self.data)
+        inp = model.input
+        latent_output = main_model.output
+        self.attention_outputs = main_model.attention_outputs
+        self.latent_model = tf.keras.Model(inp, latent_output)
 
-    def build_model(self, model, weights=None):
-        if model is not None:
-            self.model = model
-            assert self.model.input_shape[1] == self.input_len
-        if weights is not None:
-            self.model.load_weights(weights)
-        self.batch_size = max(1, 2**27 // np.prod(self.model.layers[1].output_shape[1:]))
-        inputA = tf.keras.layers.Input(shape=(self.data.dna_len, 4))
-        outputA = self.model(inputA)
-        for k,v in self.dec._get_trainable_state().items():
-            k.trainable = False
-        outputB = self.dec(outputA)
-        self.model = tf.keras.Model(inputA, outputB)
-        self.model.compile(loss='mse', optimizer='adam')
+        final_output = self.dec(latent_output)
+        self.model = tf.keras.Model(inp, final_output)
+        self.model.compile(optimizer='adam', loss='mse')
+
 
     def encode_y(self):       
-
         y_train = self.y_train[:]
         y_val = self.data.y_val[:]
-        self.data.y_latent_train = self.enc.predict(y_train)
-        self.data.y_latent_val = self.enc.predict(y_val)
-        self.y_train = self.dec.predict(self.data.y_latent_train)
-        self.y_val = self.dec.predict(self.data.y_latent_val)
+        self.data.y_latent_train = self.enc.predict(y_train, verbose=0)
+        self.data.y_latent_val = self.enc.predict(y_val, verbose=0)
+        self.y_train = self.dec.predict(self.data.y_latent_train, verbose=0)
+        self.y_val = self.dec.predict(self.data.y_latent_val, verbose=0)
         self.encoded = True
-
-        '''min_ = y_train.min()
-        max_ = y_train.max() - min_
-        self.y_train = (y_train - min_) / max_
-        self.y_val = (y_val - min_) / max_'''
 
         if self.pretrain:
             y_train_1d = np.array([gaussian_filter1d(a[-3], sigma=1, axis=0) for a in self.y_train])
@@ -261,8 +255,6 @@ class ModelMaster():
             max_ = y_train_1d.max() - min_
             self.y_train_1d = (y_train_1d - min_) / max_
             self.y_val_1d = (y_val_1d - min_) / max_
-
-        print('Hi-C maps successfully encoded')
 
 
     def save(self, save_main_model = True):
@@ -354,8 +346,8 @@ class ModelMaster():
     def _spearman(self, x1, x2):
         return [[spearmanr(i[-k-1].flat, j[-k-1].flat)[0] for k in range (x1.shape[1])] for i,j in zip(x1,x2)]
 
-    def predict(self, x, verbose=0):
-        if isinstance(x, DataGenerator):
+    def predict(self, x, verbose=0, strand='one'):
+        if isinstance(x, DataGenerator) or isinstance(x, MutSeqGen):
             if self.predict_as_training:
                 y = []
                 l = len(x)
@@ -363,23 +355,36 @@ class ModelMaster():
                     print((i+1)*'.', end='\r')
                     if isinstance(batch, tuple):
                         batch = batch[0]
-                    latent = self.predict_in_training_mode(batch)
-                    y.append(latent)#y.append(self.dec.predict(latent, batch_size=64))
-                    del batch
-                return np.concatenate(y)
+                    y_ = self.predict_in_training_mode(batch)
+                    if strand == 'both':
+                        y_rc = np.flip(self.predict_in_training_mode(np.flip(batch, axis=(1,2))), axis=2)
+                        y_ = (y_ + y_rc) / 2
+                    y.append(y_)
+                y = np.concatenate(y)
             else:
-                latent = self.model.predict(x, verbose=verbose)
-                return latent#self.dec.predict(latent, batch_size=64)
+                y = self.model.predict(x, verbose=verbose)
+                if strand == 'both':
+                    x_rc = x.copy()
+                    x_rc.revcomp = 1
+                    y_rc = np.flip(self.model.predict(x_rc, verbose=verbose), axis=2)
+                    y = (y + y_rc) / 2
         else:
             if self.predict_as_training:
-                latent =  self.predict_in_training_mode(x)
-                return latent#self.dec.predict(latent, batch_size=64)
+                y = self.predict_in_training_mode(x)
+                if strand == 'both':
+                    x_rc = np.flip(x, axis=(1,2))
+                    y_rc = np.flip(self.predict_in_training_mode(x_rc), axis=2)
+                    y = (y + y_rc) / 2
             else:
-                latent = self.model.predict(x, verbose=verbose, batch_size=self.batch_size)
-                return latent#self.dec.predict(latent, batch_size=64)
+                y = self.model.predict(x, verbose=verbose, batch_size=self.batch_size)
+                if strand == 'both':
+                    x_rc = np.flip(x, axis=(1,2))
+                    y_rc = np.flip(self.model.predict(x_rc, verbose=verbose, batch_size=self.batch_size), axis=2)
+                    y = (y + y_rc) / 2
+        return y
             
-    def predict_and_plot(self, x, **kwargs):
-        y = self.predict(x, verbose=0)
+    def predict_and_plot(self, x, strand='one', **kwargs):
+        y = self.predict(x, verbose=0, strand=strand)
         plot_map(y, **kwargs)
     
     def get_filters(self, conv_layer):
@@ -387,7 +392,7 @@ class ModelMaster():
         filters = conv[conv_layer - 1].get_weights()[0].T
         return filters
 
-    def score(self, metric='spearman', sigma=0, plot=True, strand='both'):
+    def score(self, metric='pearson', sigma=0, plot=True, strand='both', best_only=True):
         metric_name = metric
         metric = self._pearson if metric_name == 'pearson' else self._spearman
         generator = DataGenerator(self.x_val, self.y_val, 
@@ -408,45 +413,30 @@ class ModelMaster():
         r = metric(y_pred, groundtruth)
         r_control = metric(y_pred, np.random.permutation(groundtruth))
 
+        x = np.linspace(0, self.data.max_dist, self.data.h+1)
         if plot:
-            plot_score(metric_name, r, r_control, self.data.max_dist)
+            plot_score(metric_name, r, r_control, x, best_only)
         else:
             return r, r_control
 
-    def plot_results(self, x_val = None, y_val = None, equal_scale=False):
-        if x_val is None:
-            x_val = self.x_val[:9]
-            y_val = self.y_val[:9]
-            sample = 'val'
-            number = 0
-        elif isinstance(x_val, str):
-            sample = x_val
-            number = 0
-            if x_val == 'train':
-                x_val = self.x_train[:9]
-                y_val = self.y_train[:9]
-            if x_val == 'test':
-                x_val = self.x_test[:9]
-                y_val = self.y_test[:9]
-        elif isinstance(x_val, tuple) or isinstance(x_val, list):
-            sample, number = x_val
-            if sample == 'train':
-                x_val = self.x_train[number:number+9]
-                y_val = self.y_train[number:number+9]
-            elif sample == 'val':
-                x_val = self.x_val[number:number+9]
-                y_val = self.y_val[number:number+9]
-            elif sample == 'test':
-                x_val = self.x_test[number:number+9]
-                y_val = self.y_test[number:number+9]
-        y_pred = self.predict(x_val)
+    def plot_results(self, sample='val', number=0, equal_scale=False, save=False, strand='both'):
+        if sample == 'train':
+            x_val = self.x_train[number:number+9]
+            y_val = self.y_train[number:number+9]
+        elif sample == 'val':
+            x_val = self.x_val[number:number+9]
+            y_val = self.y_val[number:number+9]
+        elif sample == 'test':
+            x_val = self.x_test[number:number+9]
+            y_val = self.y_test[number:number+9]
+        y_pred = self.predict(x_val, strand=strand)
         plot_results(y_pred, y_val, sample=sample,
                      numbers=np.arange(number, number+9),
-                     data=self.data, equal_scale=equal_scale)
+                     data=self.data, equal_scale=equal_scale, save=save)
 
 
     def plot_filters(self, figsize = (16, 10), cmap = 'coolwarm', normalize=False):
-        filters = self.model.layers[0].get_weights()[0].T
+        filters = self.model.layers[1].get_weights()[0].T
         plot_filters(filters, figsize = figsize, cmap = cmap, normalize=normalize)
     
     def summary(self):
@@ -465,37 +455,36 @@ class ModelMaster():
         params['min_max'] = self.data.min_max
         for key,value in kwargs.items():
             params[key] = value
-        self.test_data = DataMaster(**params)
+        self.test_data = Dataset(**params)
         
         self.x_test = self.test_data.x_val
         self.y_test = self.ae.predict(self.test_data.y_val)
 
-    def filter_analisis(self, num, n_layers=3, theme='dark', color_shifts={'heatmap': 50, 'filters': 200},  aggregation='max', return_filters=False):
+    def filter_analisis(self, num, n_layers=3, color_shifts={'heatmap': 50, 'filters': 200},  aggregation='max', return_filters=False):
         first_layers = tf.keras.models.Sequential(self.model.layers[:n_layers])
         pred = first_layers.predict(self.data.x_val[num])[0].T
         ind, start, _ = self.data._x_val[num]
         start, end = start, start + self.data.dna_len
         if self.data.expand_dna:
             pred = pred[:, pred.shape[1] // 4 : -pred.shape[1] // 4]
-            brim = self.data.dna_len // 4
-            start, end = start + brim, end - brim
+            start, end = start + self.data.offset, end - self.data.offset
 
         aggregation_rate =  pred.shape[1] // 512
         fun = np.max if aggregation == 'max' else np.mean
         pred = block_reduce(pred, (1, aggregation_rate), fun)
 
-        #hic = self.data.get_region(self.data.names[ind], start, end)[0]
-        hic = get_2d(self.data.y_val[num])
-        y_lat = self.model.predict(self.data.x_val[num:num+1])
-        y_pred = get_2d(self.dec.predict(y_lat))
+        y_true = self.y_val[num]
+        if self.predict_as_training:
+            y_pred = self.predict(self.data.x_val[num:num+self.batch_size])[0]
+        else:
+            y_pred = self.predict(self.data.x_val[num:num+1])
 
-        filters=self.model.layers[0].get_weights()[0].T
+        filters=self.model.layers[1].get_weights()[0].T
 
         best_filters = plot_filter_analisis(pred, 
                                     y_pred, 
-                                    hic, 
+                                    y_true, 
                                     filters,
-                                    theme, 
                                     color_shifts)
         if return_filters:
             return best_filters
@@ -511,16 +500,15 @@ class MapDrawingCallback(tf.keras.callbacks.Callback):
         self.x_sample = Model.x_val[:9]
         self.y_sample = Model.y_val[:9]
         self.saving_dir = self.Model.saving_dir
-        self.saving_dir = os.path.join(self.saving_dir, 'hic_progress')
+        self.saving_dir = os.path.join(self.saving_dir, 'progress')
         if not os.path.exists(self.saving_dir):
             os.mkdir(self.saving_dir)
         if os.listdir(self.saving_dir):
-            self.intit_epoch = int(os.listdir(self.saving_dir)[-1].split('_')[0])
+            self.intit_epoch = int(os.listdir(self.saving_dir)[-1].split('.')[0]) + 1
         else:
             self.intit_epoch = 1
 
     def on_epoch_end(self, epoch, logs={}):
-        y_pred = self.Model.predict(self.x_sample, verbose=0)
-        file_name = f'{(self.intit_epoch+epoch):03d}_hic.png' if self.epochs < 1000 else  f'{(self.intit_epoch+epoch):04d}_hic.png'
-        plot_results(y_pred, self.y_sample, save = os.path.join(self.saving_dir, file_name), equal_scale=False)
+        file_name = f'{(self.intit_epoch+epoch):03d}.png' if self.epochs < 1000 else  f'{(self.intit_epoch+epoch):04d}.png'
+        self.Model.plot_results(save = os.path.join(self.saving_dir, file_name), equal_scale=False)
 
