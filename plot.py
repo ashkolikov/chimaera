@@ -6,6 +6,7 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.patheffects as PathEffects
 from mpl_toolkits.axes_grid1 import make_axes_locatable 
+from scipy import stats
 
 def get_2d(array):
     if len(array.shape) == 4:
@@ -27,12 +28,19 @@ def hic_cmap():
                                                        zones[i+1]-zones[i])
     return matplotlib.colors.ListedColormap(vals)
 
-def plot_map(map, ax=None, show=True, hic_cmap=hic_cmap(), **kwargs):
-    ax = ax if ax is not None else plt
-    ax.imshow(get_2d(map), cmap = hic_cmap, interpolation = 'none', **kwargs)
-    ax.axis('off')
+def plot_map(map, ax=None, show=True, hic_cmap="hic_cmap", name=None, colorbar=False, **kwargs):
+    if ax is None:
+        _, ax = plt.subplots()
+    im = ax.imshow(get_2d(map), cmap = hic_cmap, interpolation = 'none', **kwargs)
+    ax.set_yticks([])
+    ax.set_xticks([])
+    if colorbar:
+        annotate_colorbar(im, ax)
+    if name:
+        ax.set_ylabel(name)
     if show:
         plt.show()
+
 
 
 def plot_results(y_pred, y_true, sample=None, numbers=None, data=None,
@@ -42,8 +50,8 @@ def plot_results(y_pred, y_true, sample=None, numbers=None, data=None,
     gs1 = fig.add_gridspec(nrows=111, ncols=110, left=0, right=1, top=1, bottom=0)
     for i in range(3):
         for j in range(3):
-            ax1 = fig.add_subplot(gs1[i*40:i*40+15, j*33:j*33+30])
-            ax2 = fig.add_subplot(gs1[i*40+15:i*40+30, j*33:j*33+30])
+            ax1 = fig.add_subplot(gs1[i*40:i*40+15, j*37:j*37+30])
+            ax2 = fig.add_subplot(gs1[i*40+15:i*40+30, j*37:j*37+30])
             y1 = y_true[i*3+j]
             y2 = np.flip(y_pred[i*3+j],axis=0)
             if equal_scale:
@@ -54,9 +62,9 @@ def plot_results(y_pred, y_true, sample=None, numbers=None, data=None,
                 vmax=None
             if data is None:
                 plot_map(y1, ax=ax1, show=False,
-                         vmin=vmin, vmax=vmax)
+                         vmin=vmin, vmax=vmax, name='True')
                 plot_map(y2, ax=ax2, show=False,
-                         vmin=vmin, vmax=vmax)
+                         vmin=vmin, vmax=vmax, name='Pred')
                 ax1.axis('off')
                 ax2.axis('off')
             else:
@@ -70,6 +78,7 @@ def plot_results(y_pred, y_true, sample=None, numbers=None, data=None,
                                         full_name=False,
                                         vmin=vmin,
                                         vmax=vmax,
+                                        name='True',
                                         show=False)
                 data.plot_annotated_map(sample,
                                         numbers[i*3+j],
@@ -81,6 +90,7 @@ def plot_results(y_pred, y_true, sample=None, numbers=None, data=None,
                                         full_name=False,
                                         vmin=vmin,
                                         vmax=vmax,
+                                        name='Pred',
                                         show=False)
     if save:
         plt.savefig(save)
@@ -89,15 +99,37 @@ def plot_results(y_pred, y_true, sample=None, numbers=None, data=None,
     else:
         plt.show()
 
+    
+def plot_motiff_effect(numbers, sites, names):
+    sample_name = []
+    x = []
+    y = []
+    for site, name in zip(sites, names):
+        sample_name += [name] * np.prod(site.shape)    
+        x.append(np.tile(numbers, site.shape[0]))
+        y.append(site.flatten())
+    x = np.concatenate(x)
+    y = np.concatenate(y)
+    df = pd.DataFrame({'Number of inserted sites': x,
+                       'Mut signal - wt signal': y,
+                       'Sample': sample_name})
+    plt.figure(figsize=(13,6))
+    plt.rcParams.update({'font.size': 15})
+    sns.violinplot(x='Number of inserted sites', y='Mut signal - wt signal', data=df,
+                   hue='Sample', palette='hic_cmap', scale='width')
+    plt.legend(loc='lower left')
+    plt.rcParams.update({'font.size': 12})
+    plt.show()
+
 
 def plot_filter_analisis(pred, 
                          y_pred, 
-                         hic, 
+                         y_true, 
                          filters,
                          theme = 'dark', 
                          color_shifts = {'heatmap': 50, 'filters': 200}):
 
-    cmap_hic = hic_cmap()
+    cmap_hic = "hic_cmap"
     fig = plt.figure(figsize=(20,13))
     gs1 = fig.add_gridspec(nrows=80, ncols=83, left=0.01, right=0.75)
 
@@ -124,10 +156,10 @@ def plot_filter_analisis(pred,
                     labelleft=False, labelbottom=False)
     ax2.set_yticks(np.arange(n_filters//2)*2)
 
-    ax3.imshow(hic, aspect='auto', cmap=cmap_hic)
+    ax3.imshow(get_2d(y_true), aspect='auto', cmap=cmap_hic)
     ax3.axis('off')
 
-    ax4.imshow(np.flip(y_pred,axis=0), aspect='auto', cmap=cmap_hic)
+    ax4.imshow(np.flip(get_2d(y_pred),axis=0), aspect='auto', cmap=cmap_hic)
     ax4.axis('off')
 
     best_filters = np.argsort(pred.max(axis=1) - pred.mean(axis=1))[::-1][:8]
@@ -156,38 +188,77 @@ def plot_filters(filters, figsize = (16, 10), cmap = 'coolwarm', normalize=False
 def plot_score(metric_name,
                correct,
                permuted,
-               max_dist):
+               x,
+               best_only):
     
-    fig, ax = plt.subplots(1,1,figsize=(20,6))
-
-    x = np.linspace(0, max_dist, 32+1)
+    
     permuted = np.array(permuted)
     correct = np.array(correct)
-    x = np.tile(x[1:], len(correct)).astype(int)
-    y_name = f'{metric_name} correlation'
-    x_name = 'Genomic distance'
-    sns.boxplot(data=pd.DataFrame({x_name: x,
-                                    y_name: correct.flat}),
-                x=x_name, y=y_name,
-                color='#55a0f0', ax=ax)
-    sns.boxplot(data=pd.DataFrame({x_name: x,
-                                    y_name: permuted.flat}),
-                x=x_name, y=y_name,
-                color='#8b288d', ax=ax)
-    ax.set_ylim(-1.1,1.1)
-    for i in range(32):
-        txt = ax.text(i, correct[:,i].mean(), 
-                        f'{correct[:,i].mean():.2f}', ha='center', 
-                        color='w', weight='semibold', fontsize=10)
+    if best_only:
+        fig, ax = plt.subplots(1,1,figsize=(4,6))
+
+        means = correct.mean(axis=0)
+        best = correct[:, np.argmax(means)]
+        control = permuted[:, np.argmax(means)]
+        x = x[np.argmax(means)]
+        y_name = f'{metric_name.capitalize()} correlation'
+        x_name = ''
+        n = len(best)
+        sns.violinplot(data=pd.DataFrame({x_name: ['Predictions']*n + ['Control']*n,
+                                    y_name: np.concatenate([best, control])}),
+                       x=x_name, y=y_name, palette='hic_cmap', ax=ax)
+        ax.set_ylim(-1.2,1.2)
+        txt = ax.text(0.1,
+                best.mean(),
+                f'''Mean = {best.mean():.2f}
+Median = {np.median(best):.2f}
+P-value = {stats.ttest_1samp(best, 0).pvalue:.2f}''',
+                ha='center', 
+                color='w',
+                weight='semibold',
+                fontsize=14)
         txt.set_path_effects([PathEffects.withStroke(linewidth=2,
-                                                        foreground='black')])
-    for i in range(32):
-        txt = ax.text(i, permuted[:,i].mean(),
-                        f'{permuted[:,i].mean():.2f}', ha='center',
-                        color='w', weight='semibold', fontsize=10)
+                                                            foreground='black')])
+        txt = ax.text(0.9,
+                control.mean(),
+                f'''Mean = {control.mean():.2f}
+Median = {np.median(control):.2f}
+P-value = {stats.ttest_1samp(control, 0).pvalue:.2f}''',
+                ha='center', 
+                color='w',
+                weight='semibold',
+                fontsize=14)
+        ax.set_title(f'Correlations between true and predicted contacts\nat the distance with best score ({int(x)} bp)')
         txt.set_path_effects([PathEffects.withStroke(linewidth=2,
-                                                        foreground='black')])
-    plt.xticks(rotation = 90)
+                                                            foreground='black')])
+    else:
+        fig, ax = plt.subplots(1,1,figsize=(20,6))
+
+        x = np.tile(x[1:], len(correct)).astype(int)
+        y_name = f'{metric_name.capitalize()} correlation'
+        x_name = 'Genomic distance'
+        sns.boxplot(data=pd.DataFrame({x_name: x,
+                                        y_name: correct.flat}),
+                    x=x_name, y=y_name,
+                    color='#55a0f0', ax=ax)
+        sns.boxplot(data=pd.DataFrame({x_name: x,
+                                        y_name: permuted.flat}),
+                    x=x_name, y=y_name,
+                    color='#8b288d', ax=ax)
+        ax.set_ylim(-1.1,1.1)
+        for i in range(len(x)-1):
+            txt = ax.text(i, correct[:,i].mean(), 
+                            f'{correct[:,i].mean():.2f}', ha='center', 
+                            color='w', weight='semibold', fontsize=10)
+            txt.set_path_effects([PathEffects.withStroke(linewidth=2,
+                                                            foreground='black')])
+        for i in range(len(x)-1):
+            txt = ax.text(i, permuted[:,i].mean(),
+                            f'{permuted[:,i].mean():.2f}', ha='center',
+                            color='w', weight='semibold', fontsize=10)
+            txt.set_path_effects([PathEffects.withStroke(linewidth=2,
+                                                            foreground='black')])
+        plt.xticks(rotation = 90)
     plt.show()
 
 def plot_attention_analysis(mha_mtx, q_sum, k_sum, coords,
