@@ -1,4 +1,3 @@
-#@title chimaera.dataset
 import os
 import gc
 
@@ -9,6 +8,7 @@ from scipy.ndimage import rotate, zoom, gaussian_filter
 from scipy import interpolate
 from itertools import product
 
+from IPython.display import clear_output
 
 from cooler import Cooler
 from cooltools.lib.numutils import interp_nan#, observed_over_expected, adaptive_coarsegrain
