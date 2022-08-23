@@ -7,25 +7,7 @@ from tqdm import tqdm
 from gimmemotifs.comparison import MotifComparer
 from gimmemotifs.motif import motif_from_align
 from gimmemotifs.motif import read_motifs
-
-
-def plot_motiff_effect(x, correct, permuted, name='Motif', control='Control'):
-    sample = [name] * np.prod(correct.shape) + [control] * np.prod(permuted.shape)
-    x = np.concatenate([np.tile(x, correct.shape[0]),  np.tile(x, permuted.shape[0])])
-    y = np.concatenate([correct.flatten(), permuted.flatten()])
-    df = pd.DataFrame({'Number of sites': x,
-                       'Mut contacts - wt contacts': y,
-                       'Sample': sample})
-    
-    plt.figure(figsize=(15,8))
-    plt.rcParams.update({'font.size': 16})
-    sns.violinplot(x='Number of sites', y="Mut contacts - wt contacts", data=df,
-                   hue='Sample', palette={name:'#55a0f0', control:'#8b288d'})
-    plt.legend(loc='lower left')
-    #plt.ylim(0,2)
-    plt.show()
-    plt.rcParams.update({'font.size': 9})
-    
+ 
 
 
 class MutSeqGen(Sequence):
@@ -142,9 +124,41 @@ class Mutation():
 
     def str_to_arr(self, seq):
         seq = seq.lower()
-        alphabet = {'a' : 0, 'c' : 1, 'g' : 2, 't' : 3}
-        encoded_seq = np.array([[alphabet[i]] for i in list(seq)])
-        return self.onehot.transform(encoded_seq)
+        encoded_seq = []
+        for i in seq:
+            if i == 'a':
+                encoded_seq.append([1,0,0,0])
+            elif i == 'c':
+                encoded_seq.append([0,1,0,0])
+            elif i == 'g':
+                encoded_seq.append([0,0,1,0])
+            elif i == 't':
+                encoded_seq.append([0,0,0,1])
+            elif i == 'n':
+                encoded_seq.append([0.25,0.25,0.25,0.25])
+            elif i == 'r':
+                encoded_seq.append([0.5,0,0.5,0])
+            elif i == 'y':
+                encoded_seq.append([0,0.5,0,0.5])
+            elif i == 'k':
+                encoded_seq.append([0,0,0.5,0.5])
+            elif i == 'm':
+                encoded_seq.append([0.5,0.5,0,0])
+            elif i == 's':
+                encoded_seq.append([0,0.5,0.5,0])
+            elif i == 'w':
+                encoded_seq.append([0.5,0,0,0.5])
+            elif i == 'b':
+                encoded_seq.append([0,1/3,1/3,1/3])
+            elif i == 'd':
+                encoded_seq.append([1/3,0,1/3,1/3])
+            elif i == 'h':
+                encoded_seq.append([1/3,1/3,0,1/3])
+            elif i == 'v':
+                encoded_seq.append([1/3,1/3,1/3,0])
+            else:
+                raise ValueError(f'Input string ({seq}) is considered as nucleotide sequence but it contains non-nucleotide symbol {i}')
+        return np.array(encoded_seq)
       
     def bernulli_seq(self, length):
         random_seq = np.random.choice(4, (length, 1), p=self.p)
@@ -200,7 +214,7 @@ class Mutagenesis():
             self.x_val_good, self.y_val_good, self.idx = data_good
 
     def select_good_predictions(self, quantile, sample_size):
-        val_scores,_ = self.Model.score(metric='pearson', plot=False)
+        val_scores,_ = self.Model.score(metric='pearson', plot=False, strand='one')
         val_scores = np.mean(val_scores, axis=-1)
         n = int(quantile * len(val_scores))
         idx = np.argsort(val_scores)[-n:]
@@ -276,16 +290,106 @@ class Mutagenesis():
                                 eps_power=eps_power)
         return mha_mtx, q_sum, k_sum, y_pred, coords
 
-    def seq_to_mut(self, mutation):
-        mutation = mutation.lower()
-        l = []
-        for nucleotide in mutation:
-            vec = np.zeros(4)
-            if nucleotide != 'n':
-                pos = ['a','c','g','t'].index(nucleotide)
-                vec[pos] = 1
-            l.append(vec)
-        return np.array(l)
+    def mutation_effect(self,
+                        n,
+                        positions,
+                        mutations,
+                        name,
+                        lengths=None,
+                        repeats=1,
+                        spacer_length=0,
+                        p=None,
+                        anchor='center'):
+        x = self.Model.x_val[n]
+        x_mut, boxes = self.mutate(x,
+                                   positions=positions,
+                                   mutations=mutations,
+                                   lengths=lengths,
+                                   repeats=repeats,
+                                   spacer_length=spacer_length,
+                                   p=p,
+                                   anchor=anchor)
+        y1 = self.Model.predict(x)
+        y2 = self.Model.predict(x_mut)
+        _, axs = plt.subplots(6,1, figsize=(6,10), 
+                            gridspec_kw={'height_ratios': [2, 2, 2, 2, 0.6, 2]})
+        axs[4].axis('off')
+        self.Model.data.plot_annotated_map(ax=axs[0],
+                                y=self.Model.data.y_val[n],
+                                sample='val',
+                                number=n,
+                                axis='both',
+                                colorbar=True,
+                                x_position='top',
+                                name='Raw map',
+                                show=False)
+        self.Model.data.plot_annotated_map(ax=axs[1],
+                                y=self.Model.y_val[n],
+                                sample='val',
+                                number=n,
+                                axis='y',
+                                show_position=False,
+                                colorbar=True,
+                                x_position='top',
+                                name='AE output',
+                                show=False)
+        self.Model.data.plot_annotated_map(ax=axs[2],
+                                y=y1,
+                                sample='val',
+                                number=n,
+                                axis='y',
+                                show_position=False,
+                                colorbar=True,
+                                x_position='top',
+                                name='WT prediction',
+                                show=False)
+        self.Model.data.plot_annotated_map(y=y2,
+                                ax=axs[3],
+                                sample='val',
+                                number=n,
+                                axis='y',
+                                colorbar=True,
+                                show_position=False,
+                                mutations=boxes,
+                                mutation_names=[name]*len(boxes),
+                                name='Mut prediction',
+                                show=False)
+        self.Model.data.plot_annotated_map(ax=axs[5],
+                                y=y2-y1,
+                                sample='val',
+                                number=n,
+                                axis='y',
+                                show_position=False,
+                                colorbar=True,
+                                name='Difference',
+                                show=True,
+                                vmin=-0.3,
+                                vmax=0.3)
+        
+    def mean_effect(self,
+                    mutations,
+                    name=None,
+                    lengths=None,
+                    repeats=1,
+                    spacer_length=0,
+                    p=None,
+                    anchor='center'):
+        ys_wt = self.Model.predict(self.x_val_good[:])
+        sample_mut = [self.mutate(x,
+                                  positions=self.Model.data.dna_len//2,
+                                  mutations=mutations,
+                                  lengths=lengths,
+                                  spacer_length=spacer_length,
+                                  repeats=repeats,
+                                  p=p,
+                                  anchor='center')[0][0][0] for x in self.x_val_good]
+        sample_mut = np.concatenate(sample_mut)
+        ys_mut = self.Model.predict(sample_mut)
+        d = ys_mut - ys_wt
+        if name:
+            plot_map(np.mean(d, axis=0), name=f'Mean {name} insertion effect', colorbar=True)
+        else:
+            plot_map(np.mean(d, axis=0), colorbar=True)
 
     def bernulli_seq(self, length, p):
         mutation = np.random.choice(4, length, p=p)
@@ -310,7 +414,7 @@ class Mutagenesis():
         return start, end
     
 
-    def mutate(self, x, positions, mutations=None, lengths=None, spacer_length=0, p=None, anchor='center'):
+    def mutate(self, x, positions, mutations=None, lengths=None, spacer_length=0, p=None, anchor='center', repeats=1):
         # Unify inputs to make a list of mutations (even if it contains only one 
         # object) and corresponding lengths and positions
         if p is None:
@@ -348,8 +452,20 @@ class Mutagenesis():
         for m, l in zip(mutations, lengths):
             mutation = Mutation(mutation=m)
             if l is None:
-                mutations_processed.append(mutation)
-                lengths_processed.append(len(m))
+                if repeats < 2:
+                    mutations_processed.append(mutation)
+                    lengths_processed.append(len(m))
+                else:
+                    cassette = []
+                    for k in range(repeats - 1):
+                        cassette.append(mutation)
+                        if spacer_length > 0:
+                            cassette.append(spacer)
+                    cassette.append(mutation)
+                    mutations_processed.append(Combination(cassette))
+                    lengths_processed.append(len(m) * repeats + spacer_length * (repeats - 1))
+                    
+
             elif len(m) >= l:
                 mutations_processed.append(mutation)
                 lengths_processed.append(len(m))
@@ -380,6 +496,7 @@ class Mutagenesis():
                                 sample='val',
                                 mutations=None,
                                 lengths=None,
+                                repeats=1,
                                 p=None,
                                 spacer_length=10,
                                 control=None,
@@ -401,11 +518,12 @@ class Mutagenesis():
 
         x, boxes = self.mutate(x,
                                positions=positions,
-                                mutations=mutations,
-                                lengths=lengths,
-                                p=p,
-                                spacer_length=spacer_length,
-                                anchor=anchor)
+                               mutations=mutations,
+                               lengths=lengths,
+                               repeats=repeats,
+                               p=p,
+                               spacer_length=spacer_length,
+                               anchor=anchor)
         if control:
             pass
         return self.Model.predict(x, verbose=0), boxes
@@ -438,6 +556,7 @@ class Mutagenesis():
                         site_replics=4,
                         control_replics=6,
                         ns=2**np.arange(6),
+                        names=[],
                         anchor='center',
                         control='permute',
                         n_loci_per_seq=2,
@@ -451,10 +570,20 @@ Create new Mutagenesis object with select_samples=True')
         if random_state is not None:
             np.random.seed(random_state)
 
+        if isinstance(control, list) or isinstance(control, tuple):
+            controls = control
+        else:
+            conrtols = [control]
+
+        if isinstance(names, list) or isinstance(names, tuple):
+            names = names
+        else:
+            names = [names]
+
         site_sample = []
-        control_sample = []
+        control_samples = [[] for i in controls]
         l_site = []
-        l_control = []
+        l_control = [[] for i in controls]
 
         if fixed_length:
             target_length = ns[-1] * (spacer_length + len(motif)) - spacer_length
@@ -465,7 +594,8 @@ Create new Mutagenesis object with select_samples=True')
         for n in ns:
             if n == 0:
                 site_sample += [None] * site_replics
-                control_sample += [None] * control_replics
+                for i in range(len(control_samples)):
+                    control_samples[i] += [None] * control_replics
                 continue
             locus_with_correct_site = [site, spacer] * n
             locus_with_correct_site.pop(-1)
@@ -480,63 +610,66 @@ Create new Mutagenesis object with select_samples=True')
             #locus_with_correct_site = [site] * n ###
             
             site_sample += [locus_with_correct_site] * site_replics
-            if hasattr(control, 'name'):
-                name = motif.name
+            if names:
+                name = names[0]
             else:
                 if isinstance(motif, str):
                     name = motif
                 else:
                     motif = 'motif'
-            for replic in range(control_replics):
-                # same but we permute site between replics but not in one replic
-                if control == 'permute' or control == 'shuffle':
-                    control_name = f'Randomly shuffled {name}'
-                    control_site = Mutation(mutation=motif, permute_once=True)
-                elif control == 'revcomp':
-                    control_name = f'Reverse-complement {name}'
-                    control_site = Mutation(mutation=motif, revcomp=True)
-                elif control == 'rev':
-                    control_name = f'Reverse {name}'
-                    control_site = Mutation(mutation=motif, rev=True)
-                elif control == 'comp':
-                    control_name = f'Complement {name}'
-                    control_site = Mutation(mutation=motif, comp=True)
-                elif control == 'randomly_revcomp':
-                    control_name = f'Mixed forward and reverse-complement {name}'
-                    control_site = Mutation(mutation=motif, revcomp_each_time=True)
-                elif control == 'random':
-                    control_name = f'Random sequence of the same length'
-                    control_site = Mutation(length=len(motif), p=p)
-                else:
-                    if hasattr(control, 'name'):
-                        control_name = control.name
+            control_names = []
+            for k,control in enumerate(controls):
+                for replic in range(control_replics):
+                    # same but we permute site between replics but not in one replic
+                    if control == 'permute' or control == 'shuffle' or control == 'permuted':
+                        control_name = f'Randomly shuffled {name}'
+                        control_site = Mutation(mutation=motif, permute_once=True)
+                    elif control == 'revcomp':
+                        control_name = f'Reverse-complement {name}'
+                        control_site = Mutation(mutation=motif, revcomp=True)
+                    elif control == 'rev':
+                        control_name = f'Reverse {name}'
+                        control_site = Mutation(mutation=motif, rev=True)
+                    elif control == 'comp':
+                        control_name = f'Complement {name}'
+                        control_site = Mutation(mutation=motif, comp=True)
+                    elif control == 'randomly_revcomp':
+                        control_name = f'Mixed forward and reverse-complement {name}'
+                        control_site = Mutation(mutation=motif, revcomp_each_time=True)
+                    elif control == 'random':
+                        control_name = f'Random {len(site)}-nucleotides'
+                        control_site = Mutation(length=len(motif), p=p)
                     else:
-                        if isinstance(control, str):
-                            control_name = control
+                        if len(names) > k+1:
+                            control_name = names[k+1]
                         else:
-                            control_name = 'Control'
-                    control_site = Mutation(mutation=control)
+                            if isinstance(control, str):
+                                control_name = control
+                            else:
+                                control_name = 'Control'
+                        control_site = Mutation(mutation=control)
 
-                locus_with_control_site = [control_site, spacer] * n
-                locus_with_control_site.pop(-1)
-                if fixed_length:
-                    locus_with_control_site = [left_spacer] + locus_with_control_site + [right_spacer]
-                locus_with_control_site = Combination(locus_with_control_site)
-                #locus_with_control_site = [control_site] * n ###
-                l_control.append([(len(control)+spacer_length)*i for i in range(n)]) ###
-                control_sample.append(locus_with_control_site)
+                    locus_with_control_site = [control_site, spacer] * n
+                    locus_with_control_site.pop(-1)
+                    if fixed_length:
+                        locus_with_control_site = [left_spacer] + locus_with_control_site + [right_spacer]
+                    locus_with_control_site = Combination(locus_with_control_site)
+                    #locus_with_control_site = [control_site] * n ###
+                    l_control[k].append([(len(control)+spacer_length)*i for i in range(n)]) ###
+                    control_samples[k].append(locus_with_control_site)
+                control_names.append(control_name)
         
         scores_site = []
-        scores_control = []
+        scores_control = [[] for i in controls]
         for x in tqdm(self.x_val_good):
             l = x.shape[1]
             loci = np.random.randint(l//2 - l//8, l//2 + l//8, size=n_loci_per_seq)
             y_wt = self.Model.predict(x)
             for position in loci:
                 _, center, _ = self.point_on_map(position, 1, anchor=anchor)
-                score_wt = y_wt[0,-6:-3, center-1:center+1,0].mean()
+                score_wt = y_wt[0,:-4, center-1:center+1,0].mean()
                 scores = []
-                for le, sample in zip([l_site, l_control], [site_sample, control_sample]):
+                for le, sample in zip([l_site, *l_control], [site_sample, *control_samples]):
                     positions = [position] * len(sample)
                     #positions = [[i+position for i in j] for j in le] ###
                     x_gen = MutSeqGen(x, sample, positions, anchor, self.Model.batch_size)
@@ -557,7 +690,7 @@ Create new Mutagenesis object with select_samples=True')
                             if center - 10 < 0 or center + 10 > self.Model.data.map_size:
                                 raise ValueError('Position should not be at the margin of the map. Select something located close to its center')
 
-                            a = y[i,j,-6:-3, center-1:center+1,0].mean()
+                            a = y[i,j,:-4, center-1:center+1,0].mean()
 
                             '''b = y[i,j,-6:-3, center-9:center-6,0].mean()
                             c = y[i,j,-6:-3, center+6:center+9,0].mean()'''
@@ -565,257 +698,11 @@ Create new Mutagenesis object with select_samples=True')
                             score[i,j] = a - score_wt#* 2 / (b + c)
                     scores.append(score.T)
                 scores_site.append(scores[0])
-                scores_control.append(scores[1])
+                for i in range(len(scores_control)):
+                    scores_control[i].append(scores[i+1])
         scores_site = np.concatenate(scores_site)
-        scores_control = np.concatenate(scores_control)
-        plot_motiff_effect(ns, scores_site, scores_control,
-                           name=name.capitalize(),
-                           control=control_name.capitalize())
+        for i in range(len(scores_control)):
+            scores_control[i] = np.concatenate(scores_control[i])
+        plot_motiff_effect(ns, [scores_site] + scores_control,
+                           [name] + control_names)
         return scores_site, scores_control
-
-class GeneticSearch():
-    def __init__(self,
-                 Model,
-                 number,
-                 sample='val',
-                 critical_corr=0.7,
-                 population_size=500,
-                 initial_coverage=0.15,
-                 n_mutations=1,
-                 n_crossovers=10, 
-                 factor=1.02):
-        self.population_size = population_size
-        self.factor = factor
-        self.critical_corr = critical_corr
-        self.initial_coverage = initial_coverage
-        self.Model = Model
-        g = c = self.Model.data.gc_content / 2 # imperfect but close to real
-        a = t = (1 - self.Model.data.gc_content) / 2
-        self.background_p = [a, c, g, t]
-        self.data = Model.data
-        self.sample = sample
-        self.number = number
-        if sample == 'val':
-            self.x = data.x_val[number]
-        elif sample == 'train':
-            self.x = data.x_train[number]
-        self.seq_len = self.x.shape[1]
-        self.n_mutations = n_mutations
-        self.n_crossovers = n_crossovers
-        self.population = self.initialize()
-        self.y_wt = self.Model.predict(self.x).flat
-        self.corr_score = []
-        self.len_score = []
-        self.history = [self.population]
-
-    def initialize(self):
-        l = int(self.initial_coverage * self.seq_len)
-        starts = np.random.randint(0, self.seq_len - l, self.population_size)
-        return list(np.stack([starts, starts + l]).T.reshape(-1,1,2))
-    
-    def calculate_lens(self, population):
-        return [(i[:, 1] - i[:, 0]) for i in population]
-
-    def interbreed(self, population):
-        np.random.shuffle(population)
-        recombinant_population = []
-        max_mut_len = np.concatenate(self.calculate_lens(population)).mean()
-        for i in range(0, len(population), 2):
-            couple = population[i], population[i+1]
-            chiasmata = np.random.randint(0, self.seq_len, self.n_crossovers)
-            recombinant_couple = self.crossover_and_mutate(*couple, chiasmata, max_mut_len)
-            recombinant_population.extend(recombinant_couple)
-            if not i % 50:
-                pass#gc.collect()
-        return np.array(recombinant_population)
-
-    def crossover_and_mutate(self, a, b, chiasmata, max_mut_len):
-        if len(chiasmata) % 2:
-            chiasmata = np.append(chiasmata, self.seq_len)
-        # unzip arrays of starts and ends:
-        q = np.full(self.seq_len, False, dtype=bool)
-        w = np.full(self.seq_len, False, dtype=bool)
-
-        for index, arr in [(a, q), (b, w)]:
-            for i,j in index:
-                arr[i:j] = True
-        # crossover:
-        for i in range(0, len(chiasmata), 2):
-            c1, c2 = chiasmata[i], chiasmata[i+1]
-            q[c1:c2], w[c1:c2] = w[c1:c2].copy(), q[c1:c2].copy()
-        
-        # add mutations to random loci:
-        if max_mut_len > 0 and self.n_mutations:
-            positions = np.random.randint(0, self.seq_len - max_mut_len, self.n_mutations)
-            lens = np.random.randint(0, max_mut_len, self.n_mutations)
-            for pos, l in zip(positions, lens):
-                q[pos : pos + l] = np.logical_not(q[pos : pos + l])
-            positions = np.random.randint(0, self.seq_len - max_mut_len, self.n_mutations)
-            lens = np.random.randint(0, max_mut_len, self.n_mutations)
-            for pos, l in zip(positions, lens):
-                w[pos : pos + l] = np.logical_not(w[pos : pos + l])
-
-        # zip back to arrays of starts and ends:
-        a = np.where(q[1:]!=q[:-1])[0]+1
-        b = np.where(w[1:]!=w[:-1])[0]+1
-
-        
-        if q[0]:
-            a = np.insert(a, 0, 0)
-        if q[-1]:
-            a = np.append(a, self.seq_len)
-        if w[0]:
-            b = np.insert(b, 0, 0)
-        if w[-1]:
-            b = np.append(b, self.seq_len)
-        del q
-        del w
-        a = a.reshape(-1, 2)
-        b = b.reshape(-1, 2)
-
-        # add deletions
-        if len(a) > 0 and len(b) > 0:
-            a = np.delete(a, np.random.randint(len(a)), axis=0)
-            b = np.delete(b, np.random.randint(len(b)), axis=0)
-        
-        return a, b
-
-    def predict(self, population):
-        all_positions = []
-        all_mutations = []
-        for i in population:
-            lengths = list(i[:, 1] - i[:, 0])
-            mutations = Mutation(length=lengths, p=self.background_p)
-            all_positions.append(i[:, 0])
-            all_mutations.append(mutations)
-        gen = MutSeqGen(self.x, mutations=all_mutations, positions=all_positions, anchor='left', batch_size=self.Model.batch_size)
-        return self.Model.predict(gen)
-
-    def fitness(self, r):
-        return 1 - 1 / (1 + np.exp((-r + self.critical_corr) * 100)) # 1 - sigmoid
-
-    def len_fitness(self, lens):
-        scores = np.array([(i ** 2).sum() for i in lens])
-        return (scores.mean() / scores) ** 3
-
-    def r(self, predictions):
-        r = [np.corrcoef(y.flat, self.y_wt)[0,1] for y in predictions]
-        r = np.array(r)
-        return r
-
-    def survive(self, population, fitness):
-        survived = np.random.random(len(fitness)) < fitness
-        return population[survived]
-
-    def plot_progress(self, population, r, generations):
-        clear_output(wait=True)
-        self.corr_score.append(r.mean())
-        self.len_score.append(np.mean([i.sum() for i in self.calculate_lens(population)]))
-
-        fig, ax = plt.subplots(1, 2, figsize=(15, 5))
-        x = np.arange(len(self.corr_score), dtype=int) + 1
-        ax[0].plot(x, self.corr_score, color='red', marker='o')
-        ax[1].plot(x, self.len_score, color='blue', marker='o')
-        ax[0].legend(['Mean Pearson correlation with wt'], loc='lower left')
-        ax[1].legend(['Mean total length of knockouts'], loc='lower left')
-        ax[0].set_xlim(0, generations + 1)
-        ax[0].set_xticks(np.arange(1, generations + 1))
-        ax[1].set_xlim(0, generations + 1)
-        ax[1].set_xticks(np.arange(1, generations + 1))
-        ax[0].set_ylim(-.1, 1.1)
-        ax[1].set_yscale('log')
-        ax[1].set_ylim(10, self.x.shape[1])
-        plt.show()
-
-    def replicate(self, population):
-        lens = self.calculate_lens(population)
-        scores = self.len_fitness(lens)
-        nan_mask = np.isnan(scores)
-        scores[nan_mask] = 0 # cases with no mutation are useless
-        p = scores / scores.sum() 
-        offspring = np.random.choice(population, size=self.population_size, p=p)
-        return offspring
-
-    def evolution(self, generations=10):
-        for generation in range(generations):
-            recombinant_population = self.interbreed(self.population)
-            predictions = self.predict(recombinant_population)
-            r = self.r(predictions)
-            self.plot_progress(recombinant_population, r, generations)
-            self.history.append(recombinant_population)
-
-            fitness = self.fitness(r)
-            survived = self.survive(recombinant_population, fitness)
-            try:
-                self.population = self.replicate(survived)
-            except:
-                print('Population became degenerated, evolution stopped')
-                return self.population
-            self.critical_corr *= self.factor
-        return self.population
-    
-    def _get_seqs(self, threshold=0.5, generation=-1, selected=None):
-        x = np.zeros(self.seq_len)
-        for i in self.history[generation]:
-            for j in i:
-                x[j[0]:j[1]] +=1
-
-        xmask = x > x.max() * threshold
-        a = np.where(xmask[1:]!=xmask[:-1])[0]
-        a = a.reshape(-1,2)
-        if selected:
-            a = a[selected]
-        lens = a[:,1] - a[:,0]
-        positions = a[:,0]
-        return x, lens, positions, a
-    
-    def plot_results(self, generation=-1, threshold=0.5, selected=None):
-        Mut = Mutagenesis(self.Model)
-        plt.rcParams.update({'font.size': 9})
-        f, axs = plt.subplots(4,1, figsize=(6,7.5),
-                              gridspec_kw={'height_ratios': [2, 1, 2, 2.5]})
-        x, lens, positions, boxes = self._get_seqs(threshold, generation, selected)
-        y1 = self.Model.predict(self.x, verbose=0)
-        x2, _ = Mut.mutate(x=self.x, positions=positions, lengths=lens, anchor='left')
-        y2 = self.Model.predict(x2, verbose=0)
-        r = np.corrcoef(y1.flat, y2.flat)[0,1]
-        offset = self.data.offset
-        axs[0].plot(x[offset:-offset])
-        axs[0].set_xlim(0, len(x)//2)
-        axs[1].axis('off')
-        axs[0].set_xticks([])
-        axs[0].axis('off')
-        self.data.plot_annotated_map(ax=axs[2],
-                                    y=y1,
-                                    sample=self.sample,
-                                    number=self.number,
-                                    axis='both',
-                                     colorbar=False,
-                                    x_position='top', 
-                                    full_name=True,
-                                    show=False)
-        txt = plt.text(5,7,f'r = {r:.3}', fontsize=20, color='white')
-        txt.set_path_effects([PathEffects.withStroke(linewidth=1.5, foreground='black')])
-        self.data.plot_annotated_map(ax=axs[3],
-                                    y=y2,
-                                    sample=self.sample,
-                                    number=self.number,
-                                    axis='y',
-                                    colorbar=False,
-                                    show_position=False,
-                                    mutations=boxes,
-                                    mutation_names=['Δ']*len(boxes),
-                                    vmin=y1.min(),
-                                    vmax=y1.max(),
-                                    show=True)
-    
-    def get_seqs(self, generation=-1, threshold=0.5, selected=None, string=True):
-        _, _, _, boxes = self._get_seqs(threshold, generation, selected)
-        seqs = []
-        for i,j in boxes:
-            seqs.append(self.x[0, i : j])
-        if string:
-            return [''.join(['acgt'[i] for i in np.argmax(s, axis=1)]) for s in seqs]
-        else:
-            return seqs
-
