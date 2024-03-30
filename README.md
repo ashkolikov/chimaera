@@ -1,2 +1,29 @@
-![image](https://user-images.githubusercontent.com/79586312/127057849-d2785b2e-8f5b-4daf-bc44-ad3dbc3fd47e.png)
-Main version here: https://colab.research.google.com/drive/1EiHVCtqDKZ5QVp1AoYKbcXZY-nO762hA?usp=sharing
+### Installation with conda
+
+Pull the project:
+```bash
+git clone https://github.com/ashkolikov/chimaera.git
+cd chimaera
+```
+
+Create environment:
+```bash
+conda env create -f environment.yml
+conda activate chimaera
+```
+
+Install (dev mode):
+```bash
+pip install -e .
+```
+
+Run tests: 
+```bash
+pip install -e .
+```
+
+Enable Jupyter support: 
+```bash
+pip install ipykernel
+python -m ipykernel install --user --name chimaera --display-name "chimaera"
+```
