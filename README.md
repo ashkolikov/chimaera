@@ -1,3 +1,11 @@
+### Run code: training, inference and figures
+
+Colab to run existing models for 4 organisms (data links are also there) to get figures and metrics:
+https://colab.research.google.com/drive/16AW88yDjz9d0IZulpMk2fQ6i0LqmTjbL?usp=sharing
+
+Colab to train a new model (for S. cerevisiae):
+https://colab.research.google.com/drive/1L1GWDiRznlWnwKXXgaJN7-TksQdK5juw?usp=sharing
+
 ### Installation with conda
 
 Pull the project:
