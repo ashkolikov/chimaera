@@ -702,7 +702,7 @@ is also not recommended)")
             loaders.append(new_loader)
         return loaders
 
-    def score(self,
+def score(self,
             metric='pearson',
             sigma=0,
             strand='both',
@@ -712,6 +712,7 @@ is also not recommended)")
             exclude_imputed=True,
             shifts=1,
             normalize=True,
+            folder='',
             ):
             if metric == 'pearson':
                 metric_fun = stats.pearsonr
@@ -804,12 +805,13 @@ is also not recommended)")
                 title = self.data.organism + ' ' + self.data.experiment_names[e]
 
                 if distance == 'all' and per_fragment:
-                    plot_utils.plot_score_full(
+                    plot_score_full(
                         metric,
                         scores,
                         control_scores,
                         x,
-                        title
+                        title,
+                        folder
                         )
                 elif distance == 'all' and not per_fragment:
                     plot_utils.plot_score_line(
@@ -849,7 +851,7 @@ with p-value {pvals[0]:1e}')
 predicted one is {control_scores[0]:.4f} with p-value {control_pvals[0]:.1e}')
                 else:
                     raise ValueError("Incorrect 'distance' arg")
-
+                    
     def plot_results(self,
                         sample='test',
                         index=0,
