@@ -837,31 +837,27 @@ def plot_gene_composition(y, data, boxes, n_replicates, sd):
         ax.plot([i,i+h], [0,h], linewidth=1, c='k', alpha=0.3)
         ax.plot([i,i+h], [h,0], linewidth=1, c='k', alpha=0.3)
 
-def show_min_max_projections(data, channel, df, ax, vmin=None, vmax=None):
+def show_min_max_projections(data, channel, df, ax, vmin=None, vmax=None, score=None, amount=500):
     '''Plots mean maps from regions withs highest and lowest projections on \
 specified vectors in the latent space '''
     for i, proj in enumerate(df.columns[5:]):
-        sorted_proj = df.sort_values(by=[proj])
         best_hits=[]
-        for _,row in sorted_proj.iloc[-100:].iterrows():
+        if score is None:
+            sorted_proj = df.sort_values(by=[proj])
+            selected = sorted_proj.iloc[-amount:]
+        else:
+            selected = df.loc[df[proj]>score]
+        for _,row in selected.iterrows():
             chrom, hic_start, hic_end = row.chrom, row.map_start, row.map_end
             hic_map = data._slice_map(chrom, hic_start, hic_end)[..., channel]
             best_hits.append(hic_map)
-        title = proj.capitalize() + ': mean of 100 best hits'
+        title = proj.capitalize()
         name =  data.experiment_names[channel]
-        plot_map(np.mean(best_hits, axis=0), title=title, name=name, ax=ax[i*2],
+        if len(best_hits) > 0:
+            plot_map(np.mean(best_hits, axis=0), title=title, name=name, ax=ax[i],
                  vmin=vmin, vmax=vmax)
-
-        worst_hits=[]
-        for _,row in sorted_proj.iloc[:100].iterrows():
-            chrom, hic_start, hic_end = row.chrom, row.map_start, row.map_end
-            hic_map = data._slice_map(chrom, hic_start, hic_end)[..., channel]
-            worst_hits.append(hic_map)
-        title = proj.capitalize() + ': mean of 100 worst hits'
-        name =  data.experiment_names[channel]
-        plot_map(np.mean(worst_hits, axis=0),
-                 title=title, name=name, ax=ax[i*2+1],
-                 vmin=vmin, vmax=vmax)
+        else:
+            ax[i].axis('off')
 
 def plot_corr(dfs, experiment_names):
     '''Plots correlations between fearures in multiple cell types'''
