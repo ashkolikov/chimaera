@@ -273,7 +273,7 @@ def plot_score_basic(
     ):
     control = np.array(permuted)
     correct = np.array(correct)
-    fig, ax = plt.subplots(1,1,figsize=(4,6))
+    fig, ax = plt.subplots(1,1,figsize=(2.2,3))
     y_name = f'{metric_name.capitalize()} correlation'
     x_name = ''
     n = len(correct)
@@ -283,29 +283,19 @@ def plot_score_basic(
     ax.set_ylim(-1.2,1.2)
     txt = ax.text(0.1,
             correct.mean(),
-            f'''Mean = {correct.mean():.2f}
-Median = {np.median(correct):.2f}
-P-value = {stats.ttest_1samp(correct, 0, alternative='greater').pvalue:.2f}''',
+            f'''Median = {np.median(correct):.2f}\nSize = {len(correct)}''',
             ha='center',
-            color='w',
+            color='k',
             weight='semibold',
-            fontsize=14)
-    txt.set_path_effects([PathEffects.withStroke(linewidth=2,
-                                                foreground='black')])
+            fontsize=9)
     txt = ax.text(0.9,
             control.mean(),
-            f'''Mean = {control.mean():.2f}
-Median = {np.median(control):.2f}
-P-value = {stats.ttest_1samp(control, 0, alternative='greater').pvalue:.2f}''',
+            f'''Median = {np.median(control):.2f}\nSize = {len(control)}''',
             ha='center',
-            color='w',
+            color='k',
             weight='semibold',
-            fontsize=14)
-    ax.set_title(f'''Correlations between true and predicted contacts''')
-    txt.set_path_effects([PathEffects.withStroke(linewidth=2,
-                                                foreground='black')])
-    if title:
-        plt.suptitle(title)
+            fontsize=9)
+    ax.set_title(title)
 
 def plot_score_line(
         metric,
@@ -373,15 +363,18 @@ at the distance with the best score ({int(x)} bp)''')
     if title:
         plt.suptitle(title)
 
+
 def plot_score_full(metric_name,
                correct,
                permuted,
                x,
-               title=None):
+               title=None,
+               folder=''):
     '''Plots model testing metrics'''
-    permuted = np.array(permuted)
-    correct = np.array(correct)
-
+    permuted = np.flip(np.array(permuted), axis=1)
+    correct = np.flip(np.array(correct), axis=1)
+    np.save(os.path.join(folder, title+' predictions.npy'), correct)
+    np.save(os.path.join(folder, title+' control.npy'), permuted)
     fig, ax = plt.subplots(1,1,figsize=(20,6))
     x = np.tile(x[1:], len(correct)).astype(int)
     y_name = f'{metric_name.capitalize()} correlation'
@@ -392,18 +385,28 @@ def plot_score_full(metric_name,
     df = pd.DataFrame({x_name: x,
                         y_name: correct.flat,
                         ' ': 'Predictions'})
-    df = df.append(pd.DataFrame({x_name: x,
+    df = pd.concat([df,
+                    pd.DataFrame({x_name: x,
                         y_name: permuted.flat,
-                        ' ': 'Control'}),  ignore_index=False)
+                        ' ': 'Control'})])
     sns.boxplot(data=df, x=x_name, y=y_name, hue=' ',
                 palette='RdBu_r', ax=ax)
-    ax.set_ylim(-1.1,1.1)
+    plt.text(-0.5, 1.3, 'Mean:', ha='right')
+    plt.text(-0.5, 1.2, 'Median:', ha='right')
+    for i in range(correct.shape[1]):
+        plt.text(i, 1.3, f'{correct[:, i].mean():.2f}', ha='center')
+        plt.text(i, 1.2, f'{np.median(correct[:, i]):.2f}', ha='center')
+    ax.set_ylim(-1.1,1.4)
+    ax.set_yticks([-1.0,-0.75,-0.5,-0.25,0.0,0.25,0.5,0.75,1.0])
+    ax.grid(axis='y',linestyle='--')
+    ax.set_xlim(-2, correct.shape[1])
     plt.xticks(rotation = 90)
     ax.grid(True, axis='y')
     ax.set_axisbelow(True)
     plot_significance_between([correct.T, permuted.T])
+    plt.legend(loc='lower left')
     if title:
-        plt.suptitle(title)
+        plt.title(title.strip() + ', test sample size = ' + str(len(correct)))
 
 
 def annotate(ax, start, end, axis='both',
