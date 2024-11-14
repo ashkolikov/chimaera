@@ -3,7 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import OneHotEncoder
 
-import tensorflow as tf #!!!
+import torch.nn.functional as F
 
 from .ism import SeqMatrix, MutGenerator
 from . import plot_utils
@@ -33,7 +33,6 @@ class Motif(SeqMatrix):
 
         elif seq is not None:
             pfm = str_to_pfm(seq)
-        
 
         if len(pfm.shape) != 2 or pfm.shape[1] != 4:
             raise ValueError(f'Pfm shape should be (n, 4) but is {pfm.shape}')
@@ -41,12 +40,16 @@ class Motif(SeqMatrix):
             pfm = pfm / pfm.sum(axis=1)[..., None]
         self.pfm = pfm
         self.consensus = self._make_consensus()
+        self.revcomp = Motif(pfm=revcomp(self.pfm))
 
     def __len__(self):
         return len(self.pfm)
 
     def rc(self):
-        return revcomp(self.pfm)
+        return self.revcomp
+
+    def rc_logo(self, *args):
+        self.revcomp.logo(*args)
 
     def spawn(self, rc=False, shuffle=False):
         pfm = self.pfm
@@ -88,6 +91,20 @@ def one_hot_align_to_pfm(seqs):
 def pfm_to_pwm(pfm):
     pfm = pfm + 0.001
     return np.log2(pfm / 0.25)
+
+def parse_jaspar(motif):
+    motif=motif.split('\n')
+    motif = [[int(j) for j in i.split('[')[1][:-1].split(' ') if j] for i in motif]
+    motif = np.array(motif)
+    motif = motif/motif[:,0].sum()
+    return Motif(pfm=motif.T)
+
+def to_jaspar(arr):
+    result = []
+    for nucl, line in zip ('ACGT', arr.T):
+        line = [str(i) for i in line]
+        result.append(nucl + ' [' + ' '.join(line) + ']')
+    return '\n'.join(result)
 
 def pfm_to_logo(pfm, ax=None):
     if np.any(pfm<0):
@@ -150,15 +167,31 @@ def shuffle(pfm):
 def revcomp(pfm):
     return np.flip(pfm)
 
+def _revcomp(dna):
+    revcomp_site = []
+    pairs = {'a':'t','c':'g','g':'c','t':'a','n':'n'}
+    return ''.join(map(lambda base: pairs[base], dna))[::-1]
+    
+def one_hot(seqs):
+    if isinstance(seqs, str):
+        seqs = [seqs]
+    encoded_seqs = []
+    for seq in seqs:
+        mapping = dict(zip("acgtn", range(5)))
+        encoded_seqs.append([mapping[i] for i in seq])
+    return np.eye(5)[encoded_seqs][..., :4]
+
 def scan(dna, pfm):
     '''Scan DNA with pfm'''
-    pwm = pfm_to_pwm(pfm).astype(np.float32)[..., None]
-    if dna.dtype != np.float32:
-        dna = dna.astype(np.float32)
+    pwm = pfm_to_pwm(pfm)
     if len(dna.shape) < 3:
         dna = dna[None, ...]
-    scores = tf.nn.conv1d(dna, pwm, stride=1, padding='VALID')[...,0] #!!!
-    return np.array(scores[0])
+    motif_size = pwm.shape[1]
+    pwm = torch.Tensor(pwm.transpose((0,2,1))).cuda()
+    dna = torch.Tensor(dna.transpose((0,2,1))).cuda()
+    scores = F.conv1d(dna, pwm, padding=0)
+    scores = scores.cpu().detach().numpy()[:,0,:]
+    return scores
 
 def mean_motif_effect(
         Model,
@@ -172,16 +205,17 @@ def mean_motif_effect(
         fixed_scale=True,
         sample='val',
         plot=True,
-        normalize=True
+        normalize=True,
+        get_maxima=False
     ):
     '''Mean of maps predicted from sequences with motif insertion'''
     random_shifts = []
     if sample == 'val':
         regions_pool = Model.data.x_val.regions
     elif sample == 'test':
-        regions_pool = Model.data.x_test.regions_pool
+        regions_pool = Model.data.x_test.regions
     elif sample == 'both':
-        regions_pool = Model.data.x_test.regions + Model.data.x_val.regions    
+        regions_pool = Model.data.x_test.regions + Model.data.x_val.regions
     else:
         raise ValueError('Sample should be train, val or both')
     while len(random_shifts) < number:
@@ -209,10 +243,15 @@ def mean_motif_effect(
         composition=composition,
         offset=Model.data.offset)
     y_mut = Model.predict(gen, strand=strand, verbose=0)
-    
+
     if normalize:
-        result = (y_mut-y_wt).mean(axis=0)
+        if get_maxima:
+            result = np.abs(y_mut-y_wt).max(axis=(1,2,3)).mean()
+        else:
+            result = (y_mut-y_wt).mean(axis=0)
     else:
+        if get_maxima:
+            raise ValueError('Set normalize=True if get_maxima is True')
         result = y_mut.mean(axis=0)
     if plot:
         _, ax = plt.subplots(1,1, figsize=(7,2))
@@ -231,6 +270,32 @@ def mean_motif_effect(
         plot_utils.annotate_boxes(ax, Model.data, gen.boxes[0])
     else:
         return result
+
+def meme(seqs, size=10, random_seqs=100, runs=25):
+    total_scores = []
+    pfms = []
+    inits = [''.join(['atgc'[i] for i in np.random.choice(4,size)]) for i in range(random_seqs)]
+    for i in inits:
+        #print(i)
+        pfm = one_hot([i])
+        for j in range(runs):
+            dna = one_hot(seqs)
+            scores = scan(dna, pfm)
+            scores_rc = scan(dna, np.flip(pfm))
+            best_scores_forw = scores.max(axis=1)
+            best_scores_rc = scores_rc.max(axis=1)
+            best_scores = np.maximum(best_scores_forw, best_scores_rc)
+            chains = best_scores_forw > best_scores_rc
+            positions_forw = scores.argmax(axis=1)
+            positions_rc = scores_rc.argmax(axis=1)
+            choose_chain = lambda idx, chain: positions_forw[idx] if chain else positions_rc[idx]
+            positions = [choose_chain(k, chains[k]) for k in range(len(chains))]
+            get_seq = lambda seq, chain: seq if chain else _revcomp(seq)
+            found_motifs = [get_seq(seq[pos:pos+size], chain) for seq, pos, chain in zip(seqs, positions, chains)]
+            pfm = align_to_pfm(found_motifs)[None,:]
+        total_scores.append(np.mean(best_scores))
+        pfms.append(pfm[0])
+    return pfms[np.argmax(total_scores)]
 
 def check_motif(Model, motif, vector, name=None, experiment_index=0):
     '''Shows motif insertion effect on a projection of a predicted map on some \
