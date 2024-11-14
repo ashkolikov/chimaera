@@ -65,10 +65,9 @@ class Chimaera():
             return_mask=False,
         ):
         '''Predicts fragment of any length specified by genomic coordinates'''
-        # if denoise:
-        #     l = hic.shape[1]
-        #     (l-self.data.map_size)//(self.data.map_size//2)
-
+        if plot:
+            hic = self.data.get_hic(region, edge_policy=edge_policy)
+            mask = self.data.get_mask(region, edge_policy=edge_policy)
         if mutations is not None:
             parsed_region = self.data._parse_region(region)
             chrom, start, end = parsed_region
@@ -77,11 +76,6 @@ class Chimaera():
             end += self.data.dna_len # add some extra DNA because we can
                                      # predict only full-size fragments 
             region = f'{chrom}:{start}-{end}'
-            # if permute:
-            #     mutations = []
-            #     step = size//10
-            #     for i in range(10):
-            #         mutations.append(f'inv:{i*step}-{(i+1)*step}')
             mutated_dna = ism.mutate(
                 self.data,
                 region,
@@ -124,8 +118,6 @@ class Chimaera():
         if spare_hic_length:
             pred = pred[:, :-spare_hic_length]
         if plot:
-            hic = self.data.get_hic(region, edge_policy=edge_policy)
-            mask = self.data.get_mask(region, edge_policy=edge_policy)
             if pred.shape[1] != hic.shape[1]:
                 zoom_rate = hic.shape[1] / pred.shape[1]
                 pred = zoom(pred, (1,zoom_rate,1))
