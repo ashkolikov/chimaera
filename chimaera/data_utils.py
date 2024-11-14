@@ -97,7 +97,7 @@ def normalize_by_diag_means(chrom_slice):
     return chrom_slice
 
 def interp_nan(a_init, pad_zeros=True, method="linear"):
-    '''Interpolates NaNs. Code from cooltools'''
+    '''Interpolates NaNs. Code from cooltools https://cooltools.readthedocs.io/en/latest/'''
     shape = np.shape(a_init)
     if pad_zeros:
         a = np.zeros(tuple(s + 2 for s in shape))
