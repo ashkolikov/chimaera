@@ -3,7 +3,6 @@ pandas
 seaborn
 scipy
 numpy
-pytorch
 biopython
 cooler
 cython
