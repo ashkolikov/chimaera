@@ -187,7 +187,7 @@ def scan(dna, pfm):
     if len(dna.shape) < 3:
         dna = dna[None, ...]
     motif_size = pwm.shape[1]
-    pwm = torch.Tensor(pwm.transpose((0,2,1))).cuda()
+    pwm = torch.Tensor(pwm[None,...].transpose((0,2,1))).cuda()
     dna = torch.Tensor(dna.transpose((0,2,1))).cuda()
     scores = F.conv1d(dna, pwm, padding=0)
     scores = scores.cpu().detach().numpy()[:,0,:]
