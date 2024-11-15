@@ -40,16 +40,15 @@ class Motif(SeqMatrix):
             pfm = pfm / pfm.sum(axis=1)[..., None]
         self.pfm = pfm
         self.consensus = self._make_consensus()
-        self.revcomp = Motif(pfm=revcomp(self.pfm))
 
     def __len__(self):
         return len(self.pfm)
 
     def rc(self):
-        return self.revcomp
+        return Motif(pfm=revcomp(self.pfm))
 
     def rc_logo(self, *args):
-        self.revcomp.logo(*args)
+        Motif(pfm=revcomp(self.pfm)).logo(*args)
 
     def spawn(self, rc=False, shuffle=False):
         pfm = self.pfm
