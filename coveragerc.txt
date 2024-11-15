@@ -1,9 +1,5 @@
 [run]
-source=
-    chimaera/
-
-omit=
-    chimaera/__main__.py
+source=chimaera
 
 [report]
 exclude_lines =
