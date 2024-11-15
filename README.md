@@ -1,10 +1,8 @@
 ### Run code: training, inference and figures
 
-Colab to run existing models for 4 organisms (data links are also there) to get figures and metrics:
-https://colab.research.google.com/drive/16AW88yDjz9d0IZulpMk2fQ6i0LqmTjbL?usp=sharing
+[https://colab.research.google.com/drive/1h7yygrz1L0Sd3FlHMJREgv2B8cQIf-Wf?usp=sharing](Colab) with model for Homo sapiens - training, evaluation and interpretation methods.
 
-Colab to train a new model (for S. cerevisiae):
-https://colab.research.google.com/drive/1L1GWDiRznlWnwKXXgaJN7-TksQdK5juw?usp=sharing
+[https://colab.research.google.com/drive/1L1GWDiRznlWnwKXXgaJN7-TksQdK5juw?usp=sharing](Colab) with model for Mus musculus including pattern calling on cell cycle and CTCF motif removal.
 
 ### Installation with conda
 
@@ -21,11 +19,6 @@ conda activate chimaera
 ```
 
 Install (dev mode):
-```bash
-pip install -e .
-```
-
-Run tests: 
 ```bash
 pip install -e .
 ```
