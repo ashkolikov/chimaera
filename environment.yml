@@ -15,6 +15,3 @@ dependencies:
   - pip
   - pip:
     - cooler==0.8.11
-    - scikit-learn>=1.0.1
-    - pytorch>=2.0
-    - numpy==1.20.0
