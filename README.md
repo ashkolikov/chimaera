@@ -1,8 +1,8 @@
 ### Run code: training, inference and figures
 
-[https://colab.research.google.com/drive/1h7yygrz1L0Sd3FlHMJREgv2B8cQIf-Wf?usp=sharing](Colab) with model for Homo sapiens - training, evaluation and interpretation methods.
+[Colab](https://colab.research.google.com/drive/1h7yygrz1L0Sd3FlHMJREgv2B8cQIf-Wf?usp=sharing) with model for Homo sapiens - training, evaluation and interpretation methods.
 
-[https://colab.research.google.com/drive/1L1GWDiRznlWnwKXXgaJN7-TksQdK5juw?usp=sharing](Colab) with model for Mus musculus including pattern calling on cell cycle and CTCF motif removal.
+[Colab](https://colab.research.google.com/drive/1L1GWDiRznlWnwKXXgaJN7-TksQdK5juw?usp=sharing) with model for Mus musculus including pattern calling on cell cycle and CTCF motif removal.
 
 ### Installation with conda
 
