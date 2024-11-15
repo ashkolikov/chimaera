@@ -3,7 +3,7 @@ source=
     chimaera/
 
 omit=
-    chimaera/__main__.py
+    chimaera/__init__.py
 
 [report]
 exclude_lines =
