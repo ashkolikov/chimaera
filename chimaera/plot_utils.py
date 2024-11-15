@@ -373,8 +373,6 @@ def plot_score_full(metric_name,
     '''Plots model testing metrics'''
     permuted = np.flip(np.array(permuted), axis=1)
     correct = np.flip(np.array(correct), axis=1)
-    np.save(os.path.join(folder, title+' predictions.npy'), correct)
-    np.save(os.path.join(folder, title+' control.npy'), permuted)
     fig, ax = plt.subplots(1,1,figsize=(20,6))
     x = np.tile(x[1:], len(correct)).astype(int)
     y_name = f'{metric_name.capitalize()} correlation'
