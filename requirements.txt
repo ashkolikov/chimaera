@@ -4,11 +4,5 @@ seaborn
 scipy
 numpy
 pytorch
-scikit-learn
-scikit-image
 biopython
 cooler
-cython
-pytest
-pytest-flake8
-pytest-cov
