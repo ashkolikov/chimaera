@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 import re
 import os
 import io
@@ -40,7 +40,8 @@ setup(
     version=get_version(),
     author="ashkolikov",
     license="MIT",
-    py_modules=["chimaera"],
+    packages=find_packages(),
+    include_package_data=True,
     setup_requires=setup_requires,
     install_requires=install_requires,
 )
