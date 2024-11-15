@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 from sklearn.preprocessing import OneHotEncoder
 
 import torch.nn.functional as F
+import torch
 
 from .ism import SeqMatrix, MutGenerator
 from . import plot_utils
