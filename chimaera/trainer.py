@@ -805,7 +805,7 @@ is also not recommended)")
             title = self.data.organism + ' ' + self.data.experiment_names[e]
 
             if distance == 'all' and per_fragment:
-                plot_score_full(
+                plot_utils.plot_score_full(
                     metric,
                     scores,
                     control_scores,
