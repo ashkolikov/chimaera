@@ -551,12 +551,12 @@ is also not recommended)")
             random_flip=True,
             raw_maps=False,
             raw_maps_sigma=1,
-            lr=None,
+            lr=0.001,
             metrics='pearson',
             metric_for_choosing_best_model='pearson',
             shifts=2,
             mask_interpolated=True,
-            eval_in_both_modes=True,
+            eval_in_both_modes=False,
             freeze_decoder=True,
         ):
         # probability of random rev comp:
