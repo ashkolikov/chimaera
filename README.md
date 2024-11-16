@@ -1,5 +1,6 @@
 ### Run code: training, inference and figures
-[Colab](https://colab.research.google.com/drive/1L1GWDiRznlWnwKXXgaJN7-TksQdK5juw?usp=sharing) with training example from scratch for Apis cerana.
+[Colab](https://colab.research.google.com/drive/1Z2KtSNWx9FxDrNDeLqsMihVGNMum059V?usp=sharing) with training example from scratch for Apis cerana.
+
 [Colab](https://colab.research.google.com/drive/1h7yygrz1L0Sd3FlHMJREgv2B8cQIf-Wf?usp=sharing) with model for Homo sapiens - evaluation and interpretation methods.
 
 ### Installation with conda
