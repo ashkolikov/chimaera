@@ -279,7 +279,7 @@ def plot_score_basic(
     n = len(correct)
     sns.violinplot(data=pd.DataFrame({x_name: ['Predictions']*n + ['Control']*n,
                                 y_name: np.concatenate([correct, control])}),
-                    x=x_name, y=y_name, palette='RdBu_r', ax=ax, cut=0)
+                    x=x_name, y=y_name, hue=x_name, palette='RdBu_r', ax=ax, cut=0, legend=False)
     ax.set_ylim(-1.2,1.2)
     txt = ax.text(0.1,
             correct.mean(),
@@ -334,7 +334,7 @@ def plot_score_one_distance(
     n = len(best)
     sns.violinplot(data=pd.DataFrame({x_name: ['Predictions']*n + ['Control']*n,
                                 y_name: np.concatenate([best, control])}),
-                    x=x_name, y=y_name, palette='RdBu_r', ax=ax, cut=0)
+                    x=x_name, y=y_name,  hue=x_name, palette='RdBu_r', ax=ax, cut=0, legend=False)
     ax.set_ylim(-1.2,1.2)
     txt = ax.text(0.1,
             best.mean(),
