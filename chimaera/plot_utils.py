@@ -1051,8 +1051,8 @@ class LogoPlotter():
             canvas = fig.canvas
             canvas.draw()
             plt.close()
-            image = np.frombuffer(canvas.tostring_rgb(), dtype='uint8')
-            image = image.reshape(canvas.get_width_height()[::-1] + (3,))
+            image = np.frombuffer(canvas.buffer_rgba(), dtype='uint8')
+            image = image.reshape(canvas.get_width_height()[::-1] + (4,))[...,:3]
 
             # cut white edges and make letters to have the same sizes
             x = image.min(axis=(0,2)) < 240
@@ -1094,3 +1094,4 @@ class LogoPlotter():
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
         ax.spines['bottom'].set_visible(False)
+
