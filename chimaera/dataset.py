@@ -67,7 +67,8 @@ class Dataset():
                  organism_name = '',
                  show=True,
                  experiment_names=None,
-                 square_maps=False):
+                 square_maps=False,
+                 plot_maps=False):
 
         self.hic_data_path = hic_data_path
         self.nan_threshold = nan_threshold
@@ -84,6 +85,7 @@ class Dataset():
         self.scale_by = scale_by
         self.square_maps = square_maps
         self.interpolation_order = interpolation_order
+        self.plot_samples = plot_samples
         len_and_res = hic_data_path.split('len=')[1]
         self.mapped_len = int(len_and_res.split('_')[0])
         if fragment_length is not None:
@@ -270,7 +272,7 @@ preprocessed .npy files')
                 print(f'No DNA found for {chrom}')
         # set the correct order of chromosomes as in the genome file:
         self.chromnames.sort(key=lambda x:correct_chrom_order.index(x))
-        self.chromsizes={i:self.chromsizes[i] for i in self.chromsizes}
+        self.chromsizes={i:self.chromsizes[i] for i in self.chromnames}
 
 
         gc.collect()
@@ -743,9 +745,10 @@ pixels by setting nan_threshold=0')
         # check if sample sizes are sufficient, give recommendations if not:
         self._analyze_sample_sizes(train_sample, val_sample, test_sample)
         # plot samples on chomosomes:
-        df = self._make_dataframe_of_samples(train_sample, val_sample, test_sample)
-        print('Train sample is gray, val - orange, test - blue')
-        plot_utils.plot_samples(self.chromsizes, df)
+        if self.plot_samples:
+                df = self._make_dataframe_of_samples(train_sample, val_sample, test_sample)
+                print('Train sample is gray, val - orange, test - blue')
+                plot_utils.plot_samples(self.chromsizes, df)
         return train_sample, val_sample, test_sample
 
     def _make_dataframe_of_certain_sample(self, sample, name):
