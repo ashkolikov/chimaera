@@ -227,6 +227,7 @@ preprocessed .npy files')
         chroms = chroms.copy()
         DNA = dict()
         short = []
+        correct_chrom_order = []
         if os.path.isdir(genome): # chroms are separete files
             available_files = os.listdir(genome)
             for file_name in available_files:
@@ -240,6 +241,7 @@ preprocessed .npy files')
                         fasta = next(SeqIO.parse(full_path, "fasta"))
                         DNA[chrom] = str(fasta.seq).lower()
                         print(f'DNA data for {chrom} is loaded')
+                        correct_chrom_order.append(chrom)
                         del fasta
                         #gc.collect()
         else: # all chroms in one file
@@ -254,6 +256,7 @@ preprocessed .npy files')
                     else:
                         DNA[chrom] = str(fasta.seq).lower()
                         print(f'DNA data for {chrom} is loaded')
+                        correct_chrom_order.append(chrom)
                     n_found += 1
                 del fasta
                 #gc.collect()
@@ -265,6 +268,9 @@ preprocessed .npy files')
             elif not (chrom in DNA.keys()):
                 self.chromnames.remove(chrom)
                 print(f'No DNA found for {chrom}')
+        # set the correct order of chromosomes as in the genome file:
+        self.chromnames.sort(key=lambda x:correct_chrom_order.index(x))
+        self.chromsizes={i:self.chromsizes[i] for i in self.chromsizes}
 
 
         gc.collect()
