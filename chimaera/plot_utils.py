@@ -325,10 +325,10 @@ def plot_score_one_distance(
     permuted = np.array(permuted)
     correct = np.array(correct)
     fig, ax = plt.subplots(1,1,figsize=(4,6))
-    means = correct.mean(axis=0)
-    best = correct[:, np.argmax(means)]
-    control = permuted[:, np.argmax(means)]
-    x = x[np.argmax(means)]
+    medians = np.median(correct, axis=0)
+    best = correct[:, np.argmax(medians)]
+    control = permuted[:, np.argmax(medians)]
+    x = x[np.argmax(medians)]
     y_name = f'{metric_name.capitalize()} correlation'
     x_name = ''
     n = len(best)
@@ -363,7 +363,6 @@ at the distance with the best score ({int(x)} bp)''')
     if title:
         plt.suptitle(title)
 
-
 def plot_score_full(metric_name,
                correct,
                permuted,
@@ -373,6 +372,8 @@ def plot_score_full(metric_name,
     '''Plots model testing metrics'''
     permuted = np.flip(np.array(permuted), axis=1)
     correct = np.flip(np.array(correct), axis=1)
+    np.save(os.path.join(folder, title+' predictions.npy'), correct)
+    np.save(os.path.join(folder, title+' control.npy'), permuted)
     fig, ax = plt.subplots(1,1,figsize=(20,6))
     x = np.tile(x[1:], len(correct)).astype(int)
     y_name = f'{metric_name.capitalize()} correlation'
@@ -819,21 +820,18 @@ def plot_ig(ig,
 
     ax4.axis('off')
 
-
 def plot_gene_composition(y, data, boxes, n_replicates, sd):
     '''Plots prediction of a composition of genes in specified orientation'''
     _, ax = plt.subplots(ncols=1, nrows=1, figsize=(10, 5))
-    ax.set_title(f'{data.organism} composition of random genes (mean of \
-{n_replicates} predictions normalized by baseline)')
-    vmax = sd * 0.66
-    plot_map(y, ax=ax, vmin=-vmax, vmax=vmax)
+    if sd is not None:
+        y/=sd
+    else:
+        y/=2
+    plot_map(y, ax=ax, zero_centred=True)
     h, w = y.shape[0], y.shape[1]
     annotate_boxes(ax, data, boxes)
     ax.set_xlim(0,w)
     ax.set_ylim(h,0)
-    for i in np.linspace(-h, w, 16):
-        ax.plot([i,i+h], [0,h], linewidth=1, c='k', alpha=0.3)
-        ax.plot([i,i+h], [h,0], linewidth=1, c='k', alpha=0.3)
 
 def show_min_max_projections(data, channel, df, ax, vmin=None, vmax=None, score=None, amount=500):
     '''Plots mean maps from regions withs highest and lowest projections on \
@@ -1094,4 +1092,5 @@ class LogoPlotter():
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
         ax.spines['bottom'].set_visible(False)
+
 
