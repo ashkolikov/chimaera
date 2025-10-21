@@ -11,38 +11,36 @@ def insulation_mask(h=1):
     mask = np.zeros((32,128))
     h = int(32*h)
     for i in range(h):
-        mask[-i-1, 64-i-1:64+i+1] = -2
+        mask[-i-1, 64-i-1:64+i+1] = -0.4
     return mask
 
 def loop_mask(h=0.5):
     mask = np.zeros((32,128))
     h = int(32*(1-h))
     for i in range(4):
-        mask[max(h-i,0), 64-4+i:64+4-i] = 2
-        mask[min(h+i,31), 64-4+i:64+4-i] = 2
+        mask[max(h-i,0), 64-8+i:64+8-i] = 1
+        mask[min(h+i,31), 64-8+i:64+8-i] = 1
     return mask
 
 def fountain_mask(h=0.75):
     mask = np.zeros((32,128))
     h = int(32*h)
     for i in range(h):
-        mask[-i-1, 64-i//2-1:64+i//2+1] = 1
-    # for i in range(5):
-    #     mask[-i-1, 64-i//2-1:64+i//2+1] = 3
+        mask[-i-1, 64-i//2-1:64+i//2+1] = 1/3
     return mask
 
 def tad_mask(h=1):
     mask = np.zeros((32,128))
     h = int(32*(1-h))
     for i in range(32-h):
-        mask[i+h, 64-i-1:64+i+1] = 1
+        mask[i+h, 64-i-1:64+i+1] = 1/3
     return mask
 
 def stripe_mask(h=1):
     mask = np.zeros((32,128))
     h = int(32*h)
     for i in range(h):
-        mask[-i-1, 64-i-1:64-i+1] = 1
+        mask[-i-1, 64-i-1:64-i+1] = 0.5
     return mask
 
 def mask_to_vec(model, mask):
@@ -71,6 +69,33 @@ def vec_to_mask(model, vec):
     mask = model.latent_to_hic(vec)
     plot_utils.plot_map(mask)
     return mask
+
+def proj(model, maps, vecs):
+    if vecs.ndim == 1:
+        vecs = vecs[None, :]
+    vecs /= np.linalg.norm(vecs, axis=1)[:, None]
+    if maps.ndim == 3:
+        if maps.shape[2] <= model.data.out_channels:
+            maps = maps[None,...]
+        else:
+            maps = maps[...,None]
+    elif maps.ndim == 2:
+        maps = maps[None,...,None]
+    map_vecs = model.hic_to_latent(maps)
+
+def _make_basic_vecs(model, vector):
+    masks=[]
+    if vector == 'insulation':
+        m = latent.insulation_mask()
+    elif vector == 'fountain':
+        m = latent.fountain_mask()
+    elif vector == 'loop':
+        m = latent.loop_mask()
+    for i in range(64):
+        masks.append(np.concatenate([m[:,i:],np.zeros((32,i))], axis=1))
+    for i in range(64):
+        masks.append(np.concatenate([np.zeros((32,i+1)),m[:,:-i-1]], axis=1))
+        return model.hic_to_latent(np.array(masks)[...,None])
 
 def check_mask_reconstruction(model, mask):
     vec = mask_to_vec(model, mask)
@@ -164,3 +189,4 @@ def analyze_projections(data, dfs):
         for i, df in enumerate(dfs):
             plot_utils.show_min_max_projections(data, i, df, ax=axs[i])
         plot_utils.plot_corr(dfs, data.experiment_names)
+
