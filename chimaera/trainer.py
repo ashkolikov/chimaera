@@ -547,14 +547,14 @@ is also not recommended)")
 
     def train_dna_encoder(
             self,
-            epochs=100,
+            epochs=7,
             random_flip=True,
             raw_maps=False,
             raw_maps_sigma=1,
             lr=0.001,
             metrics='pearson',
             metric_for_choosing_best_model='pearson',
-            shifts=2,
+            shifts=12,
             mask_interpolated=True,
             eval_in_both_modes=False,
             freeze_decoder=True,
@@ -704,153 +704,192 @@ is also not recommended)")
 
     def score(self,
             metric='pearson',
-            sigma=0,
+            sigma=.5,
             strand='both',
             raw_maps=False,
             distance='best',
             per_fragment=True,
             exclude_imputed=True,
-            shifts=1,
-            normalize=True,
+            shifts=2,
+            normalize=False,
+            weights=None,
             folder='',
-        ):
-        if metric == 'pearson':
-            metric_fun = stats.pearsonr
-        elif metric == 'spearman':
-            metric_fun = stats.spearmanr
-        else:
-            raise ValueError("Metric should be 'pearson' or 'spearman'")
-        if raw_maps:
-            # metric with raw maps with small gaussian blur
-            y_test = gaussian_filter(self.data.y_test[:], (0, 1, 1, 0))
-        else:
-            # metric with autoencoder processed maps
-            if not self.denoised:
-                self.denoise_samples()
-            y_test = self.data.y_test_denoised.copy()
-            if normalize:
-                y_test -= self.mean # to avoid autoencoder bias
-
-        # using only test sample
-        loader = self.data.x_test
-
-        # make predictions with sliding window and calculate mean
-        if shifts > 1:
-            loaders = self._apply_slides(loader, shifts)
-            slides = [self.predict(l, strand=strand) for l in loaders]
-            slides = np.stack(slides, axis=1)
-            slides = [train_utils.combine_shifts(i, shifts) for i in slides]
-            y_pred = np.array(slides)
-            del slides
-        else: # make only one prediction for each fragment
-            y_pred = self.predict(loader, strand=strand)
-        if normalize:
-            y_pred -= self.mean # to avoid autoencoder bias
-        # also may add gaussian blur to predictions
-        if sigma > 0:
-            y_pred = gaussian_filter(y_pred, (0,sigma,sigma,0))
-            y_test = gaussian_filter(y_test, (0,sigma,sigma,0))
-        # do not calculate score for interpolated pixels
-        if exclude_imputed:
-            mask = self.data.y_test.mask[:] < 0.2
-        else:
-            mask = np.ones(y_test.shape, dtype=bool)
-        mask = train_utils.reshape_for_metric(
-                mask[...,0],
-                per_fragment,
-                distance
-            )
-        for e in range(self.data.out_channels):
-            # calculate scole for each experiment separately
-            y_pred_i = y_pred[...,e]
-            y_test_i = y_test[...,e]
-
-            y_pred_i = train_utils.reshape_for_metric(
-                y_pred_i,
-                per_fragment,
-                distance
-            )
-            y_test_i = train_utils.reshape_for_metric(
-                y_test_i,
-                per_fragment,
-                distance
-            )
-
-            scores, pvals = train_utils.calculate_metric_numpy(
-                y_test_i,
-                y_pred_i,
-                mask,
-                metric_fun
-            )
-            # calculate metric between randomly shuffled pairs of true and pred
-            if per_fragment:
-                index = np.random.permutation(np.arange(len(y_test_i)))
-                control_scores, control_pvals = train_utils.calculate_metric_numpy(
-                    y_test_i,
-                    y_pred_i[index],
-                    mask,
-                    metric_fun,
-                    mask[index]
-                )
+            model_for_projections=None
+            ):
+            functional = False
+            if metric == 'pearson':
+                metric_fun = stats.pearsonr
+            elif metric == 'spearman':
+                metric_fun = stats.spearmanr
+            elif metric == 'functional':
+                metric_fun = stats.spearmanr
+                distance = None
+                per_fragment = True
+                functional = True
+                exclude_imputed=False
+                if weights is None:
+                    weights = {'insulation':0.5,
+                                'loop':0,
+                                'fountain':0.5}
+                if model_for_projections is None:
+                    model_for_projections = self
+                vecs = train_utils._make_basic_vecs(model_for_projections)
             else:
-                control_scores, control_pvals = train_utils.calculate_metric_numpy(
-                    y_test_i,
-                    np.flip(y_pred_i, axis=-1),
-                    mask,
-                    metric_fun,
-                    np.flip(mask, axis=-1),
+                raise ValueError("Metric should be 'pearson' or 'spearman'")
+            if raw_maps:
+                # metric with raw maps with small gaussian blur
+                y_test = gaussian_filter(self.data.y_test[:], (0, 1, 1, 0))
+            else:
+                # metric with autoencoder processed maps
+                if not self.denoised:
+                    self.denoise_samples()
+                y_test = self.data.y_test_denoised.copy()
+                if normalize:
+                    y_test -= self.mean # to avoid autoencoder bias
+
+            # using only test sample
+            loader = self.data.x_test
+
+            # make predictions with sliding window and calculate mean
+            if shifts > 1:
+                loaders = self._apply_slides(loader, shifts)
+                slides = [self.predict(l, strand=strand) for l in loaders]
+                slides = np.stack(slides, axis=1)
+                slides = [train_utils.combine_shifts(i, shifts) for i in slides]
+                y_pred = np.array(slides)
+                del slides
+            else: # make only one prediction for each fragment
+                y_pred = self.predict(loader, strand=strand)
+            if normalize:
+                y_pred -= self.mean # to avoid autoencoder bias
+            # also may add gaussian blur to predictions
+            if sigma > 0:
+                y_pred = gaussian_filter(y_pred, (0,sigma,sigma,0))
+                y_test = gaussian_filter(y_test, (0,sigma,sigma,0))
+            # do not calculate score for interpolated pixels
+            if exclude_imputed:
+                mask = self.data.y_test.mask[:] < 0.2
+            else:
+                mask = np.ones(y_test.shape, dtype=bool)
+            mask = train_utils.reshape_for_metric(
+                    mask[...,0],
+                    per_fragment,
+                    distance
                 )
+            for e in range(self.data.out_channels):
+                # calculate scole for each experiment separately
+                y_pred_i = y_pred[...,e]
+                y_test_i = y_test[...,e]
 
-            x = np.linspace(self.data.min_dist, self.data.max_dist, self.data.h+1)
-            title = self.data.organism + ' ' + self.data.experiment_names[e]
 
-            if distance == 'all' and per_fragment:
-                plot_utils.plot_score_full(
-                    metric,
-                    scores,
-                    control_scores,
-                    x,
-                    title,
-                    folder
+                if not functional:
+                    y_pred_i = train_utils.reshape_for_metric(
+                        y_pred_i,
+                        per_fragment,
+                        distance
+                        )
+                    y_test_i = train_utils.reshape_for_metric(
+                        y_test_i,
+                        per_fragment,
+                        distance
                     )
-            elif distance == 'all' and not per_fragment:
-                plot_utils.plot_score_line(
-                    metric,
-                    scores,
-                    control_scores,
-                    x,
-                    title
+                    scores, pvals = train_utils.calculate_metric_numpy(
+                        y_test_i,
+                        y_pred_i,
+                        mask,
+                        metric_fun
                     )
-            elif distance == 'best' and per_fragment:
-                plot_utils.plot_score_one_distance(
-                    metric,
-                    scores,
-                    control_scores,
-                    x,
-                    title
+                else:
+                    y_test_i = latent.proj(model_for_projections, y_test_i[...,None], vecs)
+                    y_pred_i = latent.proj(model_for_projections, y_pred_i[...,None], vecs)
+                    mask = np.ones(y_test_i.shape, dtype=bool)
+                    scores, _ = train_utils.calculate_metric_numpy(
+                        y_test_i,
+                        y_pred_i,
+                        mask,
+                        metric_fun
+                        )
+
+                # calculate metric between randomly shuffled pairs of true and pred
+                if per_fragment:
+                    index = np.random.permutation(np.arange(len(y_test_i)))
+                    if not functional:
+                        control_scores, control_pvals = train_utils.calculate_metric_numpy(
+                            y_test_i,
+                            y_pred_i[index],
+                            mask,
+                            metric_fun,
+                            mask[index]
+                        )
+                    else:
+                        mask = np.ones(y_test_i.shape, dtype=bool)
+                        control_scores, _ = train_utils.calculate_metric_numpy(
+                            y_test_i,
+                            y_pred_i[index],
+                            mask,
+                            metric_fun,
+                            mask[index]
+                            )
+                else:
+                    control_scores, control_pvals = train_utils.calculate_metric_numpy(
+                        y_test_i,
+                        np.flip(y_pred_i, axis=-1),
+                        mask,
+                        metric_fun,
+                        np.flip(mask, axis=-1),
                     )
-            elif distance == 'best' and not per_fragment:
-                i = np.argmax(scores)
-                print(f'Best {metric} value is {scores[i]:.4f} at {int(x[i])} \
+
+                x = np.linspace(self.data.min_dist, self.data.max_dist, self.data.h+1)
+                title = self.data.organism + ' ' + self.data.experiment_names[e]
+
+                if distance == 'all' and per_fragment:
+                    plot_utils.plot_score_full(
+                        metric,
+                        scores,
+                        control_scores,
+                        x,
+                        title,
+                        folder
+                        )
+                elif distance == 'all' and not per_fragment:
+                    plot_utils.plot_score_line(
+                        metric,
+                        scores,
+                        control_scores,
+                        x,
+                        title
+                        )
+                elif distance == 'best' and per_fragment:
+                    plot_utils.plot_score_one_distance(
+                        metric,
+                        scores,
+                        control_scores,
+                        x,
+                        title
+                        )
+                elif distance == 'best' and not per_fragment:
+                    i = np.argmax(scores)
+                    print(f'Best {metric} value is {scores[i]:.4f} at {int(x[i])} \
 bp distance with p-value {pvals[i]:1e}')
-                print(f'{metric.capitalize()} between the true map and a revesed \
+                    print(f'{metric.capitalize()} between the true map and a revesed \
 predicted one at the same distance is {control_scores[i]:.4f} with p-value \
 {control_pvals[i]:.1e}')
-            elif distance is None and per_fragment:
-                plot_utils.plot_score_basic(
-                    metric,
-                    scores,
-                    control_scores,
-                    x,
-                    title
-                )
-            elif distance is None and not per_fragment:
-                print(f'{metric.capitalize()} value is {scores[0]:.4f} \
+                elif distance is None and per_fragment:
+                    plot_utils.plot_score_basic(
+                        metric,
+                        scores,
+                        control_scores,
+                        x,
+                        title
+                    )
+                elif distance is None and not per_fragment:
+                    print(f'{metric.capitalize()} value is {scores[0]:.4f} \
 with p-value {pvals[0]:1e}')
-                print(f'{metric.capitalize()} between the true map and a revesed \
+                    print(f'{metric.capitalize()} between the true map and a revesed \
 predicted one is {control_scores[0]:.4f} with p-value {control_pvals[0]:.1e}')
-            else:
-                raise ValueError("Incorrect 'distance' arg")
+                else:
+                    raise ValueError("Incorrect 'distance' arg")
+
                     
     def plot_results(self,
                         sample='test',
@@ -953,3 +992,4 @@ predicted one is {control_scores[0]:.4f} with p-value {control_pvals[0]:.1e}')
             n_blocks,
             [256,128],
             certain_len=True).plot(**self.model_params)
+
