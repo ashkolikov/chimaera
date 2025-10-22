@@ -733,7 +733,7 @@ is also not recommended)")
                                 'fountain':0.5}
                 if model_for_projections is None:
                     model_for_projections = self
-                vecs = train_utils._make_basic_vecs(model_for_projections)
+                vecs = latent._make_basic_vecs(model_for_projections)
             else:
                 raise ValueError("Metric should be 'pearson' or 'spearman'")
             if raw_maps:
@@ -992,4 +992,5 @@ predicted one is {control_scores[0]:.4f} with p-value {control_pvals[0]:.1e}')
             n_blocks,
             [256,128],
             certain_len=True).plot(**self.model_params)
+
 
