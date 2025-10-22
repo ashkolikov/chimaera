@@ -60,6 +60,8 @@ class Chimaera():
             plot=True,
             exclude_imputed=True,
             equal_scale=True,
+            vmin=None,
+            vmax=None,
             shifts=2,
             edge_policy='empty',
             return_mask=False,
@@ -68,38 +70,10 @@ class Chimaera():
         if plot:
             hic = self.data.get_hic(region, edge_policy=edge_policy)
             mask = self.data.get_mask(region, edge_policy=edge_policy)
-        if mutations is not None:
-            parsed_region = self.data._parse_region(region)
-            chrom, start, end = parsed_region
-            size = end-start
-            start -= self.data.offset
-            end += self.data.dna_len # add some extra DNA because we can
-                                     # predict only full-size fragments 
-            region = f'{chrom}:{start}-{end}'
-            mutated_dna = ism.mutate(
-                self.data,
-                region,
-                mutations, 
-                new_sequences,
-                edge_policy=edge_policy
-            )
-            # data.get_dna_loader() needs specified region but we have already
-            # sliced region of interest so we will specify the whole region
-            # (except offsets)
-            chrom = 'mutant_fragment'
-            start_in_mutated_dna = self.data.offset
-            end_in_mutated_dna = self.data.offset + size
-            region_new = f'{chrom}:{start_in_mutated_dna}-{end_in_mutated_dna}'
-            dna_loader, _, remainder_frac = self.data.get_dna_loader(
-                region_new,
-                mutated_dna,
-                edge_policy=edge_policy
-            )
-        else:
-            dna_loader, parsed_region, remainder_frac = self.data.get_dna_loader(
-                region, 
-                edge_policy=edge_policy
-            )
+        dna_loader, parsed_region, remainder_frac = self.data.get_dna_loader(
+            region,
+            edge_policy=edge_policy
+        )
         spare_frac = 1 - remainder_frac
         if shifts == 1:
             pred = self.model.predict(dna_loader, strand='both')
@@ -113,7 +87,7 @@ class Chimaera():
             dna_loader.regions = regions
             pred = self.model.predict(dna_loader, strand='both')
             pred = train_utils.combine_shifts(pred, shifts)
-        
+    
         spare_hic_length = int(spare_frac * self.data.map_size)
         if spare_hic_length:
             pred = pred[:, :-spare_hic_length]
@@ -132,27 +106,28 @@ class Chimaera():
                 if equal_scale:
                     vmin = min(np.nanmin(hic), np.nanmin(pred))
                     vmax = max(np.nanmax(hic), np.nanmax(pred))
-                else:
-                    vmin, vmax = None, None
+                    vmax = max(abs(vmin), vmax)
+                    vmax = min(vmax, 6)
+                    vmin = -vmax
                 self.data.plot_annotated_map(hic_map=hic,
-                                             chrom=chrom, start=start, end=end,
-                                             experiment_index = i,
-                                             axis=None,
-                                             ax=ax[0],
-                                             vmin=vmin,
-                                             vmax=vmax,
-                                             show=False,
-                                             )
-
+                                                chrom=chrom, start=start, end=end,
+                                                experiment_index = i,
+                                                axis=None,
+                                                ax=ax[0],
+                                                vmin=vmin,
+                                                vmax=vmax,
+                                                show=False,
+                                                )
+    
                 self.data.plot_annotated_map(hic_map=np.flip(pred, axis=0),
-                                             chrom=chrom, start=start, end=end,
-                                             experiment_index = i,
-                                             ax=ax[1],
-                                             vmin=vmin,
-                                             vmax=vmax,
-                                             axis='x',
-                                             show_position=False,
-                                             )
+                                                chrom=chrom, start=start, end=end,
+                                                experiment_index = i,
+                                                ax=ax[1],
+                                                vmin=vmin,
+                                                vmax=vmax,
+                                                axis='x',
+                                                show_position=False,
+                                                )
         else:
             if return_mask:
                 mask = self.data.get_mask(region, edge_policy=edge_policy)
@@ -357,9 +332,9 @@ their amount is {len(self.data.y_test)} so more vecs can't be shown")
     def grad_search(
             self,
             vec,
-            size=40,
+            size=50,
             n_repeats=1,
-            epochs=15,
+            epochs=50,
             number=1,
             saving_dir=None,
             experiment_index=0,
@@ -420,14 +395,14 @@ saving_dir arg')
     def evo_search(
             self,
             vec,
-            size=20,
+            size=15,
             composition='>>>>>>>',
-            alpha=5,
+            alpha=10,
             generations=20,
-            population_size=100,
-            between_insertions=10,
-            mutation_rate=0.1,
-            elite=0.1,
+            population_size=300,
+            between_insertions=20,
+            mutation_rate=0.05,
+            elite=0,
             shift_rate=0.1,
             n_crossovers=2,
             experiment_index=0,
@@ -484,12 +459,10 @@ saving_dir arg')
             normalize=normalize
         )
 
-    def check_motif(self, motif, vec, experiment_index=0, experiment_name=None, name=None):
+    def check_motif(self, motif, experiment_index=0, experiment_name=None, name=None):
         if experiment_name:
             experiment_index = self.data.experiment_names.index(experiment_name)
-        if isinstance(vec, str):
-            vec = self.vec_dict[vec]
-        return motifs.check_motif(self.model, motif, vec, experiment_index=experiment_index, name=name)
+        return motifs.check_motif(self.model, motif, experiment_index=experiment_index, name=name)
 
     def gene_composition(
             self,
@@ -502,8 +475,8 @@ saving_dir arg')
             downstream=0,
             long_spacer_length='auto',
             between_genes='auto',
-            n_replicates=128,
-            composition='>>><<<_>>><<<',
+            n_replicates=300,
+            composition='><_><_<>_<>',
             experiment_index=0,
         ):
         return genes.gene_composition(
@@ -579,3 +552,4 @@ saving_dir arg')
         control_table = genes.flip_annotation(table)
         ys_control = self.modify_all(control_table, modification, threshold=threshold, regions=regions)
         return ys_wt, ys_mut, ys_control
+
