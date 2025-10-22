@@ -44,8 +44,8 @@ class Chimaera():
 
     def _make_basic_vecs(self):
         vec_dict = dict()
-        vec_dict['insulation'] = self.mask_to_vec(latent.insulation_mask())
-        vec_dict['fountain'] = self.mask_to_vec(latent.fountain_mask())
+        vec_dict['insulation'] = self.mask_to_vec(latent.insulation_mask()*5)
+        vec_dict['fountain'] = self.mask_to_vec(latent.fountain_mask()*3)
         vec_dict['loop'] = self.mask_to_vec(latent.loop_mask())
         return vec_dict
 
@@ -67,13 +67,40 @@ class Chimaera():
             return_mask=False,
         ):
         '''Predicts fragment of any length specified by genomic coordinates'''
+        if shifts % 2 and shifts != 1:
+            shifts += 1
         if plot:
             hic = self.data.get_hic(region, edge_policy=edge_policy)
             mask = self.data.get_mask(region, edge_policy=edge_policy)
-        dna_loader, parsed_region, remainder_frac = self.data.get_dna_loader(
-            region,
-            edge_policy=edge_policy
-        )
+        if mutations is not None:
+            parsed_region = self.data._parse_region(region)
+            chrom, start, end = parsed_region
+            size = end-start
+            start -= self.data.offset
+            end += self.data.dna_len # add some extra DNA because we can
+                                     # predict only full-size fragments 
+            region = f'{chrom}:{start}-{end}'
+            mutated_dna = ism.mutate(
+                self.data,
+                region,
+                mutations, 
+                new_sequences,
+                edge_policy=edge_policy
+            )
+            chrom = 'mutant_fragment'
+            start_in_mutated_dna = self.data.offset
+            end_in_mutated_dna = self.data.offset + size
+            region_new = f'{chrom}:{start_in_mutated_dna}-{end_in_mutated_dna}'
+            dna_loader, _, remainder_frac = self.data.get_dna_loader(
+                region_new,
+                mutated_dna,
+                edge_policy=edge_policy
+            )
+        else:
+            dna_loader, parsed_region, remainder_frac = self.data.get_dna_loader(
+                region, 
+                edge_policy=edge_policy
+            )
         spare_frac = 1 - remainder_frac
         if shifts == 1:
             pred = self.model.predict(dna_loader, strand='both')
@@ -552,4 +579,5 @@ saving_dir arg')
         control_table = genes.flip_annotation(table)
         ys_control = self.modify_all(control_table, modification, threshold=threshold, regions=regions)
         return ys_wt, ys_mut, ys_control
+
 
