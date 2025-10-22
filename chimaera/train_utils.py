@@ -8,6 +8,7 @@ from time import time
 import matplotlib.pyplot as plt
 from collections import defaultdict
 from scipy import stats
+from . import latent
 
 import torch
 
@@ -42,6 +43,20 @@ def calculate_metric_numpy(y_true, y_pred, mask, metric, mask2=None):
         scores.append(score)
     scores = np.array(scores)
     return scores[..., 0], scores[..., 1]
+
+def _make_basic_vecs(model, vector):
+        masks=[]
+        if vector == 'insulation':
+            m = latent.insulation_mask()
+        elif vector == 'fountain':
+            m = latent.fountain_mask()
+        elif vector == 'loop':
+            m = latent.loop_mask()
+        for i in range(64):
+            masks.append(np.concatenate([m[:,i:],np.zeros((32,i))], axis=1))
+        for i in range(64):
+            masks.append(np.concatenate([np.zeros((32,i+1)),m[:,:-i-1]], axis=1))
+            return model.hic_to_latent(np.array(masks)[...,None])
 
 def rsquared_numpy(x, y):
     y_bar = y.mean()
@@ -386,4 +401,5 @@ def combine_shifts(y, coverage):
             ind += 1
         result[:, ind : ind + w] += y_masked[i]
         ind += step
+
     return result[:, left_margin : w_tot - right_margin]
