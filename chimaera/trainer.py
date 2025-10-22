@@ -465,12 +465,12 @@ is also not recommended)")
 
     def train_hic_autoencoder(
             self,
-            epochs,
+            epochs=7,
             metrics='pearson',
-            stop_at=0.9, # if val metric becomes more than this value, training
+            stop_at=None, # if val metric becomes more than this value, training
             #              stops (if many metrics provided, using the first one)
             mask_interpolated=False,
-            shifts=16,
+            shifts=12,
             lr=None,
             eval_in_both_modes=False,
             random_flip=True
@@ -992,6 +992,7 @@ predicted one is {control_scores[0]:.4f} with p-value {control_pvals[0]:.1e}')
             n_blocks,
             [256,128],
             certain_len=True).plot(**self.model_params)
+
 
 
 
