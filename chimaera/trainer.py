@@ -131,7 +131,7 @@ class ModelContainer():
             genome=None,
             show_data=True,
             test_chroms_only=True,
-            batch_size=8,
+            batch_size=6,
             model_dir=None,
             ae_dir=None,
             dna_encoder=None,
@@ -992,5 +992,6 @@ predicted one is {control_scores[0]:.4f} with p-value {control_pvals[0]:.1e}')
             n_blocks,
             [256,128],
             certain_len=True).plot(**self.model_params)
+
 
 
