@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import OneHotEncoder
+from scipy.stats import mannwhitneyu
 
 import torch.nn.functional as F
 import torch
@@ -94,7 +95,7 @@ def pfm_to_pwm(pfm):
 
 def parse_jaspar(motif):
     motif=motif.split('\n')
-    motif = [[int(j) for j in i.split('[')[1][:-1].split(' ') if j] for i in motif]
+    motif = [[int(j) for j in i.split('[')[1][:-1].split() if j] for i in motif]
     motif = np.array(motif)
     motif = motif/motif[:,0].sum()
     return Motif(pfm=motif.T)
@@ -270,7 +271,7 @@ def mean_motif_effect(
         plot_utils.annotate_boxes(ax, Model.data, gen.boxes[0])
     else:
         return result
-
+        
 def meme(seqs, size=10, random_seqs=100, runs=25):
     total_scores = []
     pfms = []
@@ -297,7 +298,52 @@ def meme(seqs, size=10, random_seqs=100, runs=25):
         pfms.append(pfm[0])
     return pfms[np.argmax(total_scores)]
 
-def check_motif(Model, motif, vector, name=None, experiment_index=0):
+def check_motif(Model, motif, name=None, experiment_index=0):
+    test = []
+    shuffled = []
+    random = []
+    for i in range(50):
+        test.append(mean_motif_effect(
+                Model,
+                motif,
+                composition='>'*10,
+                between_insertions=20,
+                plot=False,
+                experiment_index=experiment_index,
+                number=1,
+                strand='one',
+                normalize=True,
+                get_maxima=True,
+                sample='both'
+                ))
+        shuffled.append(mean_motif_effect(
+                Model,
+                motif,
+                composition='~'*10,
+                between_insertions=20,
+                plot=False,
+                number=1,
+                strand='one',
+                normalize=True,
+                get_maxima=True,
+                sample='both'
+                ))
+        seq = ''.join(np.random.choice(list('actg'), len(motif)))
+        random.append(mean_motif_effect(
+                Model,
+                Motif(seq=seq),
+                composition='>'*10,
+                between_insertions=20,
+                plot=False,
+                number=1,
+                strand='one',
+                normalize=True,
+                get_maxima=True,
+                sample='both'
+                ))
+    return {'ps':mannwhitneyu(test, shuffled).pvalue, 'pr':mannwhitneyu(test, random).pvalue}
+
+def check_motif_2(Model, motif, vector, name=None, experiment_index=0):
     '''Shows motif insertion effect on a projection of a predicted map on some \
 specified vector'''
     vector /= np.linalg.norm(vector)
@@ -330,3 +376,4 @@ specified vector'''
         control_name = 'Shuffled site'
     plot_utils.plot_motiff_effect(ns, np.array(projections), [site_name, control_name])
     plot_utils.plot_significance_between(projections)
+
