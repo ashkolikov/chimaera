@@ -1,18 +1,18 @@
 import os
+import torch
+import gc
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.ndimage import zoom
-from scipy.stats import spearmanr, pearsonr
-from scipy.ndimage import gaussian_filter
-from scipy.cluster.hierarchy import linkage, dendrogram
-from scipy.spatial.distance import squareform
+from Bio.Phylo.TreeConstruction import DistanceMatrix, DistanceTreeConstructor
+from Bio import Phylo
+from scipy.ndimage import zoom, gaussian_filter
+from scipy.stats import spearmanr, pearsonr, mannwhitneyu, false_discovery_control
+from .plot_utils import plot_map
 
-def save_pred(root, y, org1, org2=None, rep=None, mask=False):
+
+def save_pred(y, org1, org2=None, mask=False, root=''):
     if org2:
-        if rep:
-            saving_path = root+org1+'/'+'predicted_by_'+org2+'_model_control_'+str(rep)+'.npy'
-        else:
-            saving_path = root+org1+'/'+'predicted_by_'+org2+'_model.npy'
+        saving_path = root+org1+'/'+'predicted_by_'+org2+'_model.npy'
     else:
         if not mask:
             saving_path = root+org1+'/groundtruth.npy'
@@ -21,44 +21,52 @@ def save_pred(root, y, org1, org2=None, rep=None, mask=False):
     np.save(saving_path, y)
 
 
-def predict_by_all_models(datasets, data, region, data_org):
+def predict_by_all_models(chis, data, region, data_org, plot=True):
     ys = {}
     seq = data.get_dna(region, seq=True)
     param_names = ['dna_len', 'mapped_len', 'offset', 'binsize']
     # binsize here is not an actual binsize of Hi-C map but 1/128 of mapped_len
     data_params = {i:getattr(data, i) for i in param_names}
-    for org, chi in datasets.items():
+    for org, chi in chis.items():
         actual_params = {i:getattr(chi.data, i) for i in param_names}
         actual_model_data = chi.data
         current_model_org = chi.data.organism
         chi.data = data # replace data for model (DNA, Hi-C)
         for param, value in actual_params.items(): # change its params for this model
             setattr(chi.data, param, value)
-        y = chi.predict_region(
-                region,
-                plot=False,
-                edge_policy='cyclic',
-                )
-        save_pred(root, y, data_org, org, i)
-        ys[org] = y
+        #ys_chi = []
+        try:
+            y = chi.predict_region(
+                    region,
+                    plot=False,
+                    edge_policy='cyclic',
+                    mutations=None,
+                    shifts=4
+                    )
+            save_pred(y, data_org, org)
+            if plot:
+                _, ax = plt.subplots(figsize=(20,5))
+                ax.set_title(chi.data.organism+' predicted by '+current_model_org+' model')
+                plot_map(y, ax=ax)
+                plt.show()
+        except:
+            print(f"!!! Couldnt make a prediction of {data_org} by {org}")
+        #ys[org] = ys_chi
         for param, value in data_params.items(): # set params back
             setattr(chi.data, param, value)
         chi.data = actual_model_data # set dataset back
-    return ys
+    #return ys
 
 
-def cross_predictions(models):
-    use_list = list(models.keys())
-    all_rs = []
-    significance = []
-    all_between_replics = []
-    for i, (org, model) in enumerate(models.items()):
-        if not os.path.exists(root+org):
-            os.mkdir(root+org)
-        data = model.data
+def cross_predict(datasets, saving_path, regions, plot=False):
+    for i, (org, dataset) in enumerate(datasets.items()):
+        if not os.path.exists(saving_path+org):
+            os.mkdir(saving_path+org)
+        data = dataset.data
         print(org)
         chrom = data.chromnames[0]
         region = regions[org]
+        #region = f'{chrom}:{start}-{end}'
         hic = data.get_hic(region, edge_policy='cyclic')
         mask = data.get_mask(region, edge_policy='cyclic')
         if plot:
@@ -68,113 +76,95 @@ def cross_predictions(models):
             ax.set_title('True '+ data.organism)
             plot_map(y_plot, ax=ax)
             plt.show()
-        save_pred(root, hic, org)
-        save_pred(root, hic, org, mask=True)
-        ys = predict_by_all_models(models, data, region, org)
-
-def cross_correlate(y, y_correct, mask):
+        save_pred(hic, org, root=saving_path)
+        save_pred(mask, org, mask=True, root=saving_path)
+        predict_by_all_models(datasets, data, region, org, plot)
+        torch.cuda.empty_cache()
+        gc.collect()
+    
+def cross_correlate(y, y_correct, mask, n_shifts, one_diag, max_size_ratio):
     rs_control = []
     target_len = y_correct.shape[1] # shape (n diagonals, taget map length)
     zoom_rate = target_len / y.shape[1]
+    if max_size_ratio:
+        if (zoom_rate < 1/max_size_ratio) or (max_size_ratio > zoom_rate):
+            return np.nan, np.nan
     y = zoom(y, (zoom_rate, zoom_rate, 1), order=1)
-    shifts = 20
-    step = target_len // shifts
-    for i in range(shifts):
-        if i > 0:
-            y = np.concatenate([y[:, step:], y[:, 0:step]], axis=1)
-        n_diag = min(y.shape[0], y_correct.shape[0])
+    step = target_len // n_shifts
+    n_diag = min(y.shape[0], y_correct.shape[0])
+    if one_diag: # compares only one diagonal, the farest present in the both maps
+        y_correct_slice = y_correct[-n_diag:-n_diag+1]
+        y_slice = y[-n_diag-n_diag+1]
+        mask_slice = mask[-n_diag-n_diag+1] < 0.2 # map region with <20% interpolated pixels
+    else:
         y_correct_slice = y_correct[-n_diag:]
         y_slice = y[-n_diag:]
-        mask_slice = mask[-n_diag:]
-        if mask_slice.shape[1] < y_slice.shape[1]:
-            y_slice = y_slice[:, :mask_slice.shape[1]]
-            y_correct_slice = y_correct_slice[:, :mask_slice.shape[1]]
-        elif mask_slice.shape[1] > y_slice.shape[1]:
-            mask_slice = mask_slice[:, :y_slice.shape[1]]
-        y_correct_slice = gaussian_filter(y_correct_slice, 0.5)
-        y_slice = gaussian_filter(y_slice, 0.5)
-        r = pearsonr(
-            y_correct_slice[mask_slice].flat,
-            y_slice[mask_slice].flat
-            ).statistic
-        # also applying controls by correelating with reversed map:
-        flipped_mask = np.flip(mask_slice, axis=1)
-        r_reverse_control = pearsonr(
-            y_correct_slice[mask_slice].flat,
-            np.flip(y_slice, axis=1)[flipped_mask].flat
-            ).statistic
-        if i == 0:
-            r_true = r # first one is wt prediction
-        else:
-            rs_control.append(r) # the rest are controls
-        rs_control.append(r_reverse_control)
-    rs_control = np.array(rs_control)
-    return r_true, rs_control
+        mask_slice = mask[-n_diag:] < 0.2
+    ys = [y_slice[:, (i*step):(i+1)*step] for i in range(n_shifts)]
+    ys_correct = [y_correct_slice[:, (i*step):(i+1)*step] for i in range(n_shifts)]
+    masks = [mask_slice[:, (i*step):(i+1)*step] for i in range(n_shifts)]
+    rs = [spearmanr(i[m].flat, j[m].flat).statistic for i,j,m in zip(ys, ys_correct, masks)]
+    ys_shuffled = np.random.permutation(ys)
+    rs_control = [spearmanr(i[m].flat, j[m].flat).statistic for i,j,m in zip(ys_shuffled, ys_correct, masks)]
+    r = np.median(rs)
+    p = mannwhitneyu(rs, rs_control).pvalue
+    return r, p
 
-def make_prediction_quality_mask(groundtruth, true_pred):
-    step = 32
-    mask = np.zeros(groundtruth.shape, dtype=bool)
-    n_blocks = int(np.ceil(groundtruth.shape[1]/step))
-    for i in range(n_blocks):
-        r = np.corrcoef(groundtruth[:, i*step:(i+1)*step].flat,
-                        true_pred[:, i*step:(i+1)*step].flat)[0,1]
-        if r > 0.1:
-            mask[:, i*step:(i+1)*step] = True
-    return mask
-
-
-def get_matrix(root, organism_list)
+def make_matrix(datasets, folder, species_list, names, use_groundtruth=False, n_controls=20, one_diag=False, max_size_ratio=None):
     all_rs = []
+    all_ps = []
     significance = []
-    all_between_replics = []
-    for org in organism_list:
-        folder = root+org+'/'
-        groundtruth = np.load(folder+'groundtruth.npy')
+    if not folder.endswith('/'):
+        folder = folder + '/'
+    for org in species_list:
+        folder = folder+org+'/'
+        groundtruth = np.load(folder+'groundtruth.npy')#datasets[org].data.get_hic(regions[org], edge_policy='cyclic')#
         data_quality_mask = np.load(folder+'mask.npy')
-        true_pred = np.load(folder+f'predicted_by_{org}_model.npy')
+        #data_quality_mask = datasets[org].data.get_mask(regions[org], edge_policy='cyclic')
+        proper_pred = np.load(folder+f'predicted_by_{org}_model.npy')
+
         length1 = groundtruth.shape[1]
-        length2 = true_pred.shape[1]
+        length2 = proper_pred.shape[1]
         if not (0.99 < length1 / length2 < 1.01):
             print('Warning: shapes are different')
         length = min(length1, length2)
         groundtruth = groundtruth[:, :length]
-        true_pred = true_pred[:, :length]
+        proper_pred = proper_pred[:, :length]
         data_quality_mask = data_quality_mask[:, :length]
         mask = data_quality_mask
-        for org2 in l:
-            true = np.load(folder+f'predicted_by_{org2}_model.npy')
-
-            ys = np.array(true)
-            r, control_rs = cross_correlate(ys, true_pred, mask)
-            higher_rs = np.abs(control_rs) > np.abs(r)
-            if np.mean(higher_rs) > 0.05:
-                significance.append(False)
-            else:
-                significance.append(True)
+        for org2 in species_list:
+            try:
+                cross_pred = np.load(folder+f'predicted_by_{org2}_model.npy')
+                standard = groundtruth if use_groundtruth else proper_pred
+                r, p = cross_correlate(cross_pred, standard, mask, n_controls, one_diag, max_size_ratio)
+            except FileNotFoundError:
+                print(f'file for {org} predicted by {org2} not found')
+                r, p = np.nan, np.nan
             all_rs.append(r)
+            all_ps.append(p)
 
     all_rs = np.array(all_rs)
-    significance = np.array(significance)
-    all_rs_correct = all_rs.copy()
-    all_rs_correct[~significance] = 0
-
-    mtx = all_rs_correct.reshape(16,16).copy()
-    plt.figure(figsize=(8,8))
-    plt.imshow(mtx, cmap='RdBu_r', vmin=-1, vmax=1)
-    plt.xticks(np.arange(len(organism_list)), organism_list, rotation=90)
-    plt.yticks(np.arange(len(organism_list)), organism_list)
-    for i in range(len(l)):
-        for j in range(len(l)):
-            plt.text(i,j,f'{mtx[j,i]:.2f}', ha='center', va='center')
-    return mtx
+    all_ps = np.array(all_ps)
+    all_ps[~np.isnan(all_ps)] = false_discovery_control(all_ps[~np.isnan(all_ps)]) # all_ps*sum(~np.isnan(all_ps)) #bonferroni correction #
+    all_ps[np.isnan(all_ps)] = 0 # not to convert nan rs into zeros at the next step
+    all_rs[all_ps > 0.05] = 0
+    all_rs[np.isnan(all_rs)] = 0
+    matrix = all_rs.reshape(len(species_list), len(species_list)).T
+    plt.figure(figsize=(10, 10))
+    plt.imshow(matrix, cmap='RdBu_r', vmin=-1, vmax=1)
+    plt.xticks(np.arange(len(species_list)), names, rotation=90)
+    plt.yticks(np.arange(len(species_list)), names)
+    for i in range(len(species_list)):
+        for j in range(len(species_list)):
+            text = f'{matrix[j,i]:.2f}' if not (np.isnan(matrix[j,i]) or matrix[j,i]==0) else ''
+            plt.text(i, j, text, ha='center', va='center')
+    return matrix
   
-def tree(mtx, organism_list, mtx2=None):
-  if mtx2 is not None:
-    mtx = mtx*0.5 + mtx2*0.5
-  mtx[np.diag_indices(len(mtx)]=1
-  dissimilarity = 1 - (mtx+mtx.T)
-  for i in range(len(organism_list)):
-      dissimilarity[i,i]=0
-  Z = linkage(squareform(dissimilarity), 'average')
-  dendrogram(Z, labels=organism_list, orientation='left')
-  plt.show()
+def tree(mtx, names, saving_folder='')
+    mtx[np.diag_indices(len(names))]=1
+    dissimilarity = 1 - np.nanmean([mtx, mtx.T], axis=0)
+    matrix = [list(row)[:i+1] for i,row in enumerate(dissimilarity)]
+    dm = DistanceMatrix(names, matrix)
+    constructor = DistanceTreeConstructor()
+    tree = constructor.nj(dm)
+    Phylo.write(tree, os.path.join(saving_folder, 'tree.xml'), "phyloxml")
