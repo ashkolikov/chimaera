@@ -12,7 +12,6 @@ from torch import masked_select
 import json
 import warnings
 
-
 from . import data_utils
 from . import plot_utils
 
@@ -32,7 +31,7 @@ def dataset_from_params(
         raise FileNotFoundError('Params file not found')
     data_params.pop('batch_size')
     if test_chroms_only:
-        chroms = [i.split(':')[0] for i in data_params['test_regions'].split(';')]
+        chroms = [i.split(':')[0].strip() for i in data_params['test_regions'].split(';')]
         data_params['chroms_to_include'] = chroms
     data_params.update(kwargs)
     data = Dataset(hic_data_path=hic_data_path,
@@ -55,7 +54,7 @@ class Dataset():
                  h = 32,
                  sigma = 0,
                  nan_threshold = 0.2,
-                 cross_threshold = 0.75,
+                 cross_threshold = -np.inf,
                  enlarge_crosses = 0,
                  skip_quadrants = False,
                  remove_first_diag = 2,
@@ -68,7 +67,7 @@ class Dataset():
                  show=True,
                  experiment_names=None,
                  square_maps=False,
-                 plot_maps=False):
+                 plot_samples=True):
 
         self.hic_data_path = hic_data_path
         self.nan_threshold = nan_threshold
@@ -85,7 +84,6 @@ class Dataset():
         self.scale_by = scale_by
         self.square_maps = square_maps
         self.interpolation_order = interpolation_order
-        self.plot_samples = plot_samples
         len_and_res = hic_data_path.split('len=')[1]
         self.mapped_len = int(len_and_res.split('_')[0])
         if fragment_length is not None:
@@ -95,6 +93,7 @@ class Dataset():
         # not flexible now
         self.map_size = 128
         self.cmap = "RdBu_r"
+        self.plot_samples = plot_samples
 
         self.offset = self.mapped_len // 2 if offset=='default' else offset
         if self.offset > self.mapped_len // 2:
@@ -120,6 +119,7 @@ class Dataset():
             chroms_to_exclude
         )
         self.chromnames = list(self.chromsizes.keys())
+
 
         self.test_regions = self._parse_test_split(test_regions)
 
@@ -355,18 +355,18 @@ along the main diagonal.'''
                                 empty_bins[j][i] = True
             masks = self._update_masks(masks, empty_bins)
 
-            # diag normalization 
+            # diag normalization
             chrom_hic[masks==1] = np.nan
-    
-            
+
+
             # strange bins handling
             valid = chrom_hic[masks==0]
             valid[np.isnan(valid)] = 0
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                m = np.nanmedian(chrom_hic)
-                strange_bins = np.nanmedian(chrom_hic, axis=1) < self.cross_threshold * m
-            masks = self._update_masks(masks, strange_bins)
+            # with warnings.catch_warnings():
+            #     warnings.simplefilter("ignore")
+            #     m = np.nanmedian(chrom_hic)
+            #     strange_bins = np.nanmedian(chrom_hic, axis=1) < self.cross_threshold * m
+            # masks = self._update_masks(masks, strange_bins)
             chrom_hic[masks==1] = np.nan
 
             chrom_hic = np.log(chrom_hic + self.psi)
@@ -532,21 +532,21 @@ are too short. Type chroms for test sample manually in 'test_split' argument")
                 raise ValueError(f'Coordinates {start, end} exсeed chrom {chrom} \
 map size ({chrom_len})')
             elif edge_policy == 'empty':  # adds zero bins
-                if start < 0:  
+                if start < 0:
                     left_empty = np.zeros((h, -start, c))
                     hic_map = np.concatenate([left_empty, hic_map], axis=1)
                 if end > chrom_len:
                     right_empty = np.zeros((h, end-chrom_len, c))
                     hic_map = np.concatenate([hic_map, right_empty], axis=1)
             elif edge_policy == 'cyclic': # adds bins from the other end
-                if start < 0:  
+                if start < 0:
                     left_empty = hic_map[:, start:]
                     hic_map = np.concatenate([left_empty, hic_map], axis=1)
                 if end > chrom_len:
                     right_empty = hic_map[:, :end-chrom_len]
                     hic_map = np.concatenate([hic_map, right_empty], axis=1)
             else:
-                raise ValueError("edge_policy should be 'error', 'empty' or 'cyclic'") 
+                raise ValueError("edge_policy should be 'error', 'empty' or 'cyclic'")
         if rev:
             hic_map = np.flip(hic_map, axis=1)
         if fixed_size:
@@ -580,21 +580,21 @@ map size ({chrom_len})')
                 raise ValueError(f'Coordinates {start, end} exсeed chrom {chrom} \
 map size ({chrom_len})')
             elif edge_policy == 'empty':  # adds masked bins
-                if start < 0:  
+                if start < 0:
                     left_empty = np.ones((h, -start, c))
                     hic_map = np.concatenate([left_empty, hic_map], axis=1)
                 if end > chrom_len:
                     right_empty = np.ones((h, end-chrom_len, c))
                     hic_map = np.concatenate([hic_map, right_empty], axis=1)
             elif edge_policy == 'cyclic': # adds bins from the other end
-                if start < 0:  
+                if start < 0:
                     left_empty = hic_map[:, start:]
                     hic_map = np.concatenate([left_empty, hic_map], axis=1)
                 if end > chrom_len:
                     right_empty = hic_map[:, :end-chrom_len]
                     hic_map = np.concatenate([hic_map, right_empty], axis=1)
             else:
-                raise ValueError("edge_policy should be 'error', 'empty' or 'cyclic'") 
+                raise ValueError("edge_policy should be 'error', 'empty' or 'cyclic'")
         if rev:
             hic_map = np.flip(hic_map, axis=1)
         if fixed_size:
@@ -620,21 +620,21 @@ map size ({chrom_len})')
                 raise ValueError(f'Coordinates {start, end} exсeed chrom {chrom} \
 chrom size ({chrom_len})')
             elif edge_policy == 'empty':  # adds masked bins
-                if start < 0:  
+                if start < 0:
                     left_empty = 'n'*(-start)
                     dna = left_empty + dna
                 if end > chrom_len:
                     right_empty = 'n'*(end-chrom_len)
                     dna = dna + right_empty
             elif edge_policy == 'cyclic': # adds bins from the other end
-                if start < 0:  
+                if start < 0:
                     left_empty = dna[start:]
                     dna = left_empty + dna
                 if end > chrom_len:
                     right_empty = dna[:end-chrom_len]
                     dna = dna + right_empty
             else:
-                raise ValueError("edge_policy should be 'error', 'empty' or 'cyclic'") 
+                raise ValueError("edge_policy should be 'error', 'empty' or 'cyclic'")
         if rev_comp: #
             dna = data_utils._revcomp(dna) # !!! revcomp in sequence
         if seq:
@@ -746,9 +746,9 @@ pixels by setting nan_threshold=0')
         self._analyze_sample_sizes(train_sample, val_sample, test_sample)
         # plot samples on chomosomes:
         if self.plot_samples:
-                df = self._make_dataframe_of_samples(train_sample, val_sample, test_sample)
-                print('Train sample is gray, val - orange, test - blue')
-                plot_utils.plot_samples(self.chromsizes, df)
+            df = self._make_dataframe_of_samples(train_sample, val_sample, test_sample)
+            print('Train sample is gray, val - orange, test - blue')
+            plot_utils.plot_samples(self.chromsizes, df)
         return train_sample, val_sample, test_sample
 
     def _make_dataframe_of_certain_sample(self, sample, name):
