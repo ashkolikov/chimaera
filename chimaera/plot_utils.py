@@ -372,8 +372,8 @@ def plot_score_full(metric_name,
     '''Plots model testing metrics'''
     permuted = np.flip(np.array(permuted), axis=1)
     correct = np.flip(np.array(correct), axis=1)
-    np.save(os.path.join(folder, title+' predictions.npy'), correct)
-    np.save(os.path.join(folder, title+' control.npy'), permuted)
+    # np.save(os.path.join(folder, title+' predictions.npy'), correct)
+    # np.save(os.path.join(folder, title+' control.npy'), permuted)
     fig, ax = plt.subplots(1,1,figsize=(20,6))
     x = np.tile(x[1:], len(correct)).astype(int)
     y_name = f'{metric_name.capitalize()} correlation'
@@ -916,8 +916,8 @@ def _plot_spreares_schema(rs, colors, angle_between):
     canvas = fig.canvas
     canvas.draw()
     plt.close()
-    image = np.frombuffer(canvas.tostring_rgb(), dtype='uint8')
-    image = image.reshape(canvas.get_width_height()[::-1] + (3,))
+    image = np.frombuffer(canvas.buffer_rgba(), dtype='uint8')
+    image = image.reshape(canvas.get_width_height()[::-1] + (4,))[...,:3]
     x = image.min(axis=(0,2)) < 240
     y = image.min(axis=(1,2)) < 240
     xmesh = np.repeat(x[None,:],len(y),axis=0)
@@ -1092,5 +1092,6 @@ class LogoPlotter():
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
         ax.spines['bottom'].set_visible(False)
+
 
 
