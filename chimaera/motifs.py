@@ -272,7 +272,19 @@ def mean_motif_effect(
     else:
         return result
         
-def meme(seqs, size=10, random_seqs=100, runs=25):
+def scan_2(dna, pfm):
+    '''Scan DNA with pfm'''
+    pwm = pfm_to_pwm(pfm)
+    if len(dna.shape) < 3:
+        dna = dna[None, ...]
+    motif_size = pwm.shape[1]
+    pwm = torch.Tensor(pwm.transpose((0,2,1))).cuda()
+    dna = torch.Tensor(dna.transpose((0,2,1))).cuda()
+    scores = F.conv1d(dna, pwm, padding=0)
+    scores = scores.cpu().detach().numpy()[:,0,:]
+    return scores
+    
+def meme(seqs, size=10, random_seqs=100, runs=25, early_stop=True):
     total_scores = []
     pfms = []
     inits = [''.join(['atgc'[i] for i in np.random.choice(4,size)]) for i in range(random_seqs)]
@@ -281,8 +293,8 @@ def meme(seqs, size=10, random_seqs=100, runs=25):
         pfm = one_hot([i])
         for j in range(runs):
             dna = one_hot(seqs)
-            scores = scan(dna, pfm)
-            scores_rc = scan(dna, np.flip(pfm))
+            scores = scan_2(dna, pfm)
+            scores_rc = scan_2(dna, np.flip(pfm))
             best_scores_forw = scores.max(axis=1)
             best_scores_rc = scores_rc.max(axis=1)
             best_scores = np.maximum(best_scores_forw, best_scores_rc)
@@ -292,7 +304,18 @@ def meme(seqs, size=10, random_seqs=100, runs=25):
             choose_chain = lambda idx, chain: positions_forw[idx] if chain else positions_rc[idx]
             positions = [choose_chain(k, chains[k]) for k in range(len(chains))]
             get_seq = lambda seq, chain: seq if chain else _revcomp(seq)
+            #print(np.mean(seq_scores))
+            if j==1:
+                start_score=np.mean(best_scores)
+            if j==6 and early_stop:
+                if np.mean(best_scores) / start_score < 2:
+                    break
             found_motifs = [get_seq(seq[pos:pos+size], chain) for seq, pos, chain in zip(seqs, positions, chains)]
+            #print(min(positions))
+            # plt.hist([len(i) for i in found_motifs],bins=15)
+            # plt.show()
+            # assert(False)
+            #found_motifs = [i+'n'*(size-len(i)) for i in found_motifs]
             pfm = align_to_pfm(found_motifs)[None,:]
         total_scores.append(np.mean(best_scores))
         pfms.append(pfm[0])
@@ -376,4 +399,5 @@ specified vector'''
         control_name = 'Shuffled site'
     plot_utils.plot_motiff_effect(ns, np.array(projections), [site_name, control_name])
     plot_utils.plot_significance_between(projections)
+
 
