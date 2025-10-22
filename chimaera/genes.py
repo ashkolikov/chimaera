@@ -136,7 +136,7 @@ specified orientation'''
     pearson = stats.pearsonr(half_1.mean(axis=0).flat, half_2.mean(axis=0).flat)
     if pearson.pvalue < 0.05:
         verdict = f' correlate significantly with Pearson r={pearson.statistic:.2f}'
-        plot_gene_composition(y.mean(axis=0), Model.data, gen.boxes[0], n_replicates, Model.sd)
+        plot_utils.plot_gene_composition(y.mean(axis=0), Model.data, gen.boxes[0], n_replicates, Model.sd)
     else:
         verdict = ' do not correlate significantly'
     print('Results of two independent runs' + verdict)
@@ -216,3 +216,4 @@ def make_subtable(table, regions):
         mask |= (table['chrom']==chrom) & (table['end'] > start) & (table['start'] < end)
 
     return table[mask].copy()
+
