@@ -1,9 +1,10 @@
-matplotlib
-pandas
+matplotlib >= 3.10.0
+pandas >= 2.2.2
 seaborn
 scipy
-numpy
-biopython
+pytorch
+numpy >= 2.0.2
+biopython >= 1.85
 cooler
 cython
 pytest
