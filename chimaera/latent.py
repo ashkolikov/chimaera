@@ -86,11 +86,15 @@ def proj(model, maps, vecs):
 def _make_basic_vecs(model, vector):
     masks=[]
     if vector == 'insulation':
-        m = latent.insulation_mask()
+        m = insulation_mask()
     elif vector == 'fountain':
-        m = latent.fountain_mask()
+        m = fountain_mask()
     elif vector == 'loop':
-        m = latent.loop_mask()
+        m = loop_mask()
+    elif vector == 'tad':
+        m = tad_mask()
+    else:
+        raise ValueError('vector name should be loop, insulation, tad or fountain')
     for i in range(64):
         masks.append(np.concatenate([m[:,i:],np.zeros((32,i))], axis=1))
     for i in range(64):
@@ -189,4 +193,5 @@ def analyze_projections(data, dfs):
         for i, df in enumerate(dfs):
             plot_utils.show_min_max_projections(data, i, df, ax=axs[i])
         plot_utils.plot_corr(dfs, data.experiment_names)
+
 
