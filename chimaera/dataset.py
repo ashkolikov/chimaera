@@ -53,7 +53,7 @@ class Dataset():
                  val_fraction = 0.33,
                  h = 32,
                  sigma = 0,
-                 nan_threshold = 0.2,
+                 nan_threshold = 0.25,
                  cross_threshold = -np.inf,
                  enlarge_crosses = 0,
                  skip_quadrants = False,
