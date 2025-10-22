@@ -88,8 +88,8 @@ def gene_composition(Model,
                      between_genes='auto',
                      upstream=0,
                      downstream=0,
-                     n_replicates=64,
-                     composition='>>><<<_>>><<<',
+                     n_replicates=300,
+                     composition='><_><_<>_<>',
                      experiment_index=0,
                      edge_policy='empty'
                      ):
@@ -136,17 +136,15 @@ specified orientation'''
     pearson = stats.pearsonr(half_1.mean(axis=0).flat, half_2.mean(axis=0).flat)
     if pearson.pvalue < 0.05:
         verdict = f' correlate significantly with Pearson r={pearson.statistic:.2f}'
-        plot_utils.plot_gene_composition(y.mean(axis=0), Model.data, gen.boxes[0], n_replicates, Model.sd)
+        plot_gene_composition(y.mean(axis=0), Model.data, gen.boxes[0], n_replicates, Model.sd)
     else:
         verdict = ' do not correlate significantly'
     print('Results of two independent runs' + verdict)
 
 def parse_gtf(path, type='transcript'):
-    gtf = pd.read_csv(path, sep='\t', names=['chrom', '_', 'type', 'start', 'end', '-', 'strand', '--', '---'])
+    gtf = pd.read_csv(path, sep='\t', names=['chrom', '_', 'type', 'start', 'end', '-', 'strand', '--', '---'], on_bad_lines='skip')
     table = gtf.loc[:,['chrom', 'type', 'start', 'end', 'strand']]
     table = table[table['type']==type].loc[:,['chrom', 'start', 'end', 'strand']]
-    if type == 'transcript':
-        print('WARNING: using transcripts as genes. Keep in mind - starts and stops of transcripts are not starts and stops of genes')
     return table
 
 def parse_tsv(path, score_col='score'):
@@ -216,4 +214,5 @@ def make_subtable(table, regions):
     for region in regions:
         chrom, start, end = region
         mask |= (table['chrom']==chrom) & (table['end'] > start) & (table['start'] < end)
+
     return table[mask].copy()
